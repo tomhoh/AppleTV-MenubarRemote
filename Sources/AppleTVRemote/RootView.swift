@@ -57,6 +57,14 @@ struct RootView: View {
             // Refresh the list when revealed; the connection caches the
             // last fetched list but the user may have installed apps since.
             connection.fetchApps(completion: nil)
+            // Also force an icon-cache refresh — the auto-refresh observer
+            // only fires when appList *changes*, so revisiting the launcher
+            // with the same list won't otherwise retry any apps that were
+            // marked notFound or whose fetch failed.
+            let ids = connection.appList.map { $0.id }
+            if !ids.isEmpty {
+                AppIconCache.shared.refresh(bundleIDs: ids)
+            }
         }
     }
 

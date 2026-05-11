@@ -38,9 +38,10 @@ struct AppLauncherPanel: View {
                 isPresented = false
             } label: {
                 Image(systemName: "chevron.right")
-                    .font(.caption)
+                    .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.secondary)
-                    .padding(4)
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .help("Close app launcher")
@@ -110,7 +111,7 @@ struct AppLauncherPanel: View {
             isPresented = false
         } label: {
             VStack(spacing: 4) {
-                iconView(for: app.id)
+                iconView(for: app)
                     .frame(width: 52, height: 52)
                     .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
                 Text(app.name)
@@ -125,18 +126,41 @@ struct AppLauncherPanel: View {
     }
 
     @ViewBuilder
-    private func iconView(for bundleID: String) -> some View {
-        if let nsImage = iconCache.icon(for: bundleID) {
+    private func iconView(for app: (id: String, name: String)) -> some View {
+        if let nsImage = iconCache.icon(for: app.id) {
             Image(nsImage: nsImage).resizable().scaledToFit()
         } else {
-            RoundedRectangle(cornerRadius: 11, style: .continuous)
-                .fill(.quaternary)
-                .overlay(
-                    Image(systemName: "app.fill")
-                        .font(.title2)
-                        .foregroundStyle(.tertiary)
-                )
+            // No iTunes lookup result — give every app something recognisable
+            // (coloured tile with the first letter) instead of a generic
+            // placeholder that reads as a missing icon.
+            placeholderTile(for: app)
         }
+    }
+
+    private func placeholderTile(for app: (id: String, name: String)) -> some View {
+        let colors = colorPair(for: app.id)
+        let initial = app.name.first.map { String($0).uppercased() } ?? "?"
+        return RoundedRectangle(cornerRadius: 11, style: .continuous)
+            .fill(LinearGradient(colors: colors,
+                                 startPoint: .topLeading,
+                                 endPoint: .bottomTrailing))
+            .overlay(
+                Text(initial)
+                    .font(.system(size: 24, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white)
+                    .shadow(color: .black.opacity(0.15), radius: 1, y: 1)
+            )
+    }
+
+    /// Deterministic per-bundle-ID hue so the same app always gets the same
+    /// colour tile — easier for the user to recognise across sessions.
+    private func colorPair(for id: String) -> [Color] {
+        let hash = id.utf8.reduce(0) { ($0 &* 31) &+ Int($1) }
+        let hue = Double(abs(hash) % 360) / 360.0
+        return [
+            Color(hue: hue, saturation: 0.55, brightness: 0.78),
+            Color(hue: hue, saturation: 0.70, brightness: 0.52),
+        ]
     }
 
     private var filteredApps: [(id: String, name: String)] {
