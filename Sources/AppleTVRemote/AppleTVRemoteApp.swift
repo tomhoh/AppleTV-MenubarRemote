@@ -3,6 +3,9 @@ import AppKit
 import Combine
 import AppleTVProtocol
 
+/// Menu-bar-only entry point. There is no main window — the entire UI is
+/// the popover hosted by `MenuBarController` and the floating text-input
+/// window opened by `TextInputWindowManager`.
 @main
 struct AppleTVRemoteApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
@@ -10,47 +13,41 @@ struct AppleTVRemoteApp: App {
     @StateObject private var connection  = CompanionConnection()
     @StateObject private var autoConnect = AutoConnectStore()
     @StateObject private var reconnector = AutoReconnector()
-    @State       private var ipcServer:  IPCServer?
+    @State       private var ipcServer:           IPCServer?
     @State       private var autoConnectObserver: AnyCancellable?
-    @State       private var appListObserver: AnyCancellable?
-    @State       private var iconRefreshTimer: Timer?
+    @State       private var appListObserver:     AnyCancellable?
+    @State       private var iconRefreshTimer:    Timer?
 
     var body: some Scene {
-        // Register setUp on the delegate here — body evaluates before
-        // applicationDidFinishLaunching fires on macOS, so this is guaranteed
-        // to be set in time for headless (`open -g`) launches.
+        // Register setUp on the delegate during body evaluation so it's ready
+        // before applicationDidFinishLaunching fires (especially for headless
+        // `open -g` launches with no visible window).
         let _ = { appDelegate.onFinishLaunching = setUp }()
 
-        return WindowGroup {
-            ContentView()
-                .environmentObject(discovery)
-                .environmentObject(connection)
-                .environmentObject(autoConnect)
-                .environmentObject(reconnector)
-                .preferredColorScheme(.dark)
-                .background(VisualEffectBackground(material: .underWindowBackground,
-                                                   blendingMode: .behindWindow))
-                .background(MainWindowConfigurator())   // hide-on-close + translucency + no disconnect
-                .onAppear {
-                    // Fallback for Dock/normal launches where the window appears.
-                    setUp()
-                }
-        }
-        .windowResizability(.contentMinSize)
-        .commands {
-            CommandGroup(replacing: .newItem) {}
-        }
+        // SwiftUI's App protocol requires at least one Scene; we don't show
+        // a main window, so a Settings scene with EmptyView() is the
+        // standard no-op placeholder. The user never sees it.
+        return Settings { EmptyView() }
     }
 
-    /// Called by AppDelegate.applicationDidFinishLaunching — fires regardless
-    /// of whether a window is visible (handles `open -g` headless launches).
-    /// Idempotent: safe to call again from .onAppear.
+    /// Called by AppDelegate.applicationDidFinishLaunching. Idempotent.
     private func setUp() {
-        appDelegate.onFinishLaunching = nil  // clear after first real call
+        appDelegate.onFinishLaunching = nil
         appDelegate.connection = connection
+
+        // Pure menu-bar-only app — no Dock icon, no menu bar.
+        NSApp.setActivationPolicy(.accessory)
+
         discovery.startDiscovery()
-        MenuBarController.shared.setUp(discovery: discovery, connection: connection, autoConnect: autoConnect, reconnector: reconnector)
+        MenuBarController.shared.setUp(
+            discovery: discovery,
+            connection: connection,
+            autoConnect: autoConnect,
+            reconnector: reconnector
+        )
         reconnector.setUp(connection: connection, discovery: discovery, autoConnect: autoConnect)
+        TextInputWindowManager.shared.setUp(connection: connection)
+
         if ipcServer == nil {
             let server = IPCServer(connection: connection,
                                    discovery: discovery,
@@ -93,57 +90,37 @@ struct AppleTVRemoteApp: App {
 
 // MARK: - App delegate
 
-/// Keeps the app alive when all windows close. Without this, SwiftUI's default
-/// Settle delay used after first appear to suppress visual flashes from
-/// transient state (sidebar reflow, connection state churn). Long enough
-/// that device restore + the first round-trip can complete; short enough
-/// that the user just sees a single ProgressView, not a beat of nothing.
-/// Centralised here so the three on-appear timers stay in sync.
 enum LaunchSettle {
+    /// Settle delay used after first appear to suppress visual flashes from
+    /// transient state (connection churn). Centralised here so any timers
+    /// can stay in sync.
     static let delay: TimeInterval = 0.5
 }
 
-/// `applicationShouldTerminateAfterLastWindowClosed == true` terminates the
-/// process whenever the user closes a secondary window (e.g. the standard
-/// About panel) while the main window is hidden — since the menu-bar status
-/// item is not a window, AppKit considers the app window-less and quits it.
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Set by AppleTVRemoteApp after SwiftUI initialises its @StateObjects.
     var onFinishLaunching: (() -> Void)?
 
+    weak var connection: CompanionConnection?
+
     func applicationDidFinishLaunching(_ notification: Notification) {
-        onFinishLaunching?();
+        onFinishLaunching?()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        // Menu-bar-only — never quit just because the popover or text input
+        // window closed.
         false
     }
 
-    /// Dock-icon click while no windows are visible: re-show the main window
-    /// (which WindowHider ordered out rather than closed). Returning `false`
-    /// tells AppKit we've handled the reopen ourselves so it doesn't try to
-    /// un-miniaturize or surface some other window on top.
-    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
-        MenuBarController.shared.openMainWindow()
-        if connection?.keyboardActive == true {
-            KeyboardNotificationManager.shared.cancelAttention()
-            NotificationCenter.default.post(
-                name: KeyboardNotificationManager.openKeyboardSheetNotification, object: nil)
-        }
-        return false
-    }
-
     func applicationDidBecomeActive(_ notification: Notification) {
-        // Fires when app is activated from outside (e.g. terminal-notifier click).
-        // Only open the keyboard sheet if we previously sent a notification
-        // (notified flag is set) — avoids spurious opens on normal activation.
+        // If the user clicks a "type to Apple TV" notification while a text
+        // field is active on the TV, surface the text-input window.
         guard KeyboardNotificationManager.shared.wasNotified,
               connection?.keyboardActive == true else { return }
         KeyboardNotificationManager.shared.cancelAttention()
         NotificationCenter.default.post(
             name: KeyboardNotificationManager.openKeyboardSheetNotification, object: nil)
     }
-
-    weak var connection: CompanionConnection?
 }

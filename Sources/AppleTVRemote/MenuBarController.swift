@@ -6,26 +6,32 @@ import AppleTVLogging
 import AppleTVProtocol
 import AppleTVIPC
 
-// MARK: - Menu bar controller
-
+/// Owns the menu-bar status item and the popover that hosts the SwiftUI
+/// remote. Menu-bar-only — no main window. Resizes the popover when
+/// `RootView` posts a content-size change (e.g. when the app launcher
+/// slide-out toggles).
 @MainActor
 final class MenuBarController: NSObject, NSPopoverDelegate, NSMenuDelegate {
     static let shared = MenuBarController()
 
     private var statusItem:       NSStatusItem?
     private var popover:          NSPopover?
+    private var session:          RemoteSession?
     private var stateCancellable: AnyCancellable?
-    weak var mainWindow:          NSWindow?
+    private var sizeObserver:     NSObjectProtocol?
+
     private weak var connection:  CompanionConnection?
+    private weak var discovery:   DeviceDiscovery?
+    private weak var autoConnect: AutoConnectStore?
 
-    /// Set while `openMainWindow()` is transitioning from popover → main window.
-    /// Tells `popoverDidClose` to skip its deactivate (which would otherwise
-    /// steal focus from the main window we just raised).
-    private var suppressPopoverDeactivate = false
-
-    func setUp(discovery: DeviceDiscovery, connection: CompanionConnection, autoConnect: AutoConnectStore, reconnector: AutoReconnector) {
+    func setUp(discovery: DeviceDiscovery,
+               connection: CompanionConnection,
+               autoConnect: AutoConnectStore,
+               reconnector: AutoReconnector) {
         guard statusItem == nil else { return }
-        self.connection = connection
+        self.connection  = connection
+        self.discovery   = discovery
+        self.autoConnect = autoConnect
 
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         statusItem = item
@@ -35,30 +41,38 @@ final class MenuBarController: NSObject, NSPopoverDelegate, NSMenuDelegate {
                 ?? NSImage(systemSymbolName: "tv.fill", accessibilityDescription: nil)
                 ?? NSImage(systemSymbolName: "tv",      accessibilityDescription: nil)
         img?.isTemplate = true
+        img?.size = NSSize(width: 18, height: 18)
         button.image = img
         button.imageScaling = .scaleProportionallyDown
         button.action = #selector(toggle(_:))
         button.target = self
         button.sendAction(on: [.leftMouseUp, .rightMouseUp])
 
+        let session = RemoteSession(connection: connection)
+        self.session = session
+
         let vc = NSHostingController(rootView:
-            MenuBarRemoteView()
+            RootView()
                 .environmentObject(discovery)
                 .environmentObject(connection)
                 .environmentObject(autoConnect)
                 .environmentObject(reconnector)
-                .preferredColorScheme(.dark)
+                .environmentObject(session)
         )
         vc.sizingOptions = .preferredContentSize
 
         let pop = NSPopover()
         pop.contentViewController = vc
+        pop.contentSize = NSSize(
+            width: RemoteTheme.popoverWidth,
+            height: RemoteTheme.popoverHeight
+        )
         pop.behavior = .transient
         pop.delegate = self
         popover = pop
 
-        // Re-key the popover window when state changes while it's visible,
-        // so it doesn't look washed-out after a disconnect/reconnect.
+        // Re-key the popover window when state changes while visible so it
+        // doesn't look washed-out after a disconnect/reconnect.
         stateCancellable = connection.$state
             .dropFirst()
             .receive(on: DispatchQueue.main)
@@ -66,14 +80,22 @@ final class MenuBarController: NSObject, NSPopoverDelegate, NSMenuDelegate {
                 guard let self, self.popover?.isShown == true, NSApp.isActive else { return }
                 self.popover?.contentViewController?.view.window?.makeKey()
             }
+
+        // Resize popover when RootView signals a content-size change
+        // (e.g. user toggled the app launcher slide-out).
+        sizeObserver = NotificationCenter.default.addObserver(
+            forName: .menuBarPopoverContentSizeChanged,
+            object: nil,
+            queue: .main
+        ) { [weak self] note in
+            guard let self,
+                  let size = note.userInfo?["size"] as? CGSize else { return }
+            Task { @MainActor in self.popover?.contentSize = size }
+        }
     }
 
     nonisolated func popoverDidClose(_ notification: Notification) {
         Task { @MainActor in
-            if self.suppressPopoverDeactivate {
-                self.suppressPopoverDeactivate = false
-                return
-            }
             NSApp.deactivate()
         }
     }
@@ -81,85 +103,127 @@ final class MenuBarController: NSObject, NSPopoverDelegate, NSMenuDelegate {
     @objc private func toggle(_ sender: AnyObject?) {
         guard let pop = popover, let button = statusItem?.button else { return }
 
-        // Right-click → context menu instead of popover.
         if NSApp.currentEvent?.type == .rightMouseUp {
             showContextMenu()
             return
         }
 
         if pop.isShown {
-            // Deactivate before closing so the main window never gets a chance
-            // to surface between performClose and the popoverDidClose callback.
             NSApp.deactivate()
             pop.performClose(nil)
         } else {
-            // Activate before showing so the popover renders with active (non-washed-out) colours.
-            // ignoringOtherApps:false avoids briefly raising the main window.
             NSApp.activate(ignoringOtherApps: false)
             pop.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             DispatchQueue.main.async {
                 let popWin = pop.contentViewController?.view.window
                 popWin?.makeKey()
                 popWin?.makeFirstResponder(nil)
-                // Previously we orderOut'd every other window to stop the main
-                // window from taking over on popover dismiss, but that hid the
-                // main window whenever the user clicked the menu-bar icon —
-                // unwanted. Leave other windows alone.
             }
         }
     }
 
-    // MARK: - Open main window
-
+    /// Programmatically open the popover. Kept for IPCServer callers that
+    /// previously called `openMainWindow()`; routing to the popover is the
+    /// closest equivalent now that there is no main window.
     func openMainWindow() {
-        if let pop = popover, pop.isShown {
-            suppressPopoverDeactivate = true
-            pop.performClose(nil)
-        }
-        DispatchQueue.main.async {
+        guard let pop = popover, let button = statusItem?.button else { return }
+        if !pop.isShown {
             NSApp.activate(ignoringOtherApps: true)
-            self.mainWindow?.makeKeyAndOrderFront(nil)
+            pop.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         }
     }
 
-    // MARK: - Context menu
+    // MARK: - Right-click context menu
 
     private func showContextMenu() {
         let menu = NSMenu()
         menu.delegate = self
 
-        // About
+        // ── Header: connection status ─────────────────────────────────────
+        let statusItem: NSMenuItem
+        switch connection?.state ?? .disconnected {
+        case .connected:
+            let name = connection?.currentDevice?.name ?? "Apple TV"
+            statusItem = NSMenuItem(title: "Connected: \(name)", action: nil, keyEquivalent: "")
+        case .connecting:
+            statusItem = NSMenuItem(title: "Connecting…", action: nil, keyEquivalent: "")
+        case .waking:
+            statusItem = NSMenuItem(title: "Waking Apple TV…", action: nil, keyEquivalent: "")
+        case .awaitingPairingPin:
+            statusItem = NSMenuItem(title: "Awaiting PIN…", action: nil, keyEquivalent: "")
+        case .error:
+            statusItem = NSMenuItem(title: "Connection error", action: nil, keyEquivalent: "")
+        case .disconnected:
+            statusItem = NSMenuItem(title: "Not connected", action: nil, keyEquivalent: "")
+        }
+        statusItem.isEnabled = false
+        menu.addItem(statusItem)
+        menu.addItem(.separator())
+
+        // ── Devices ───────────────────────────────────────────────────────
+        let devices = discovery?.devices ?? []
+        if devices.isEmpty {
+            let empty = NSMenuItem(title: "No Apple TVs detected", action: nil, keyEquivalent: "")
+            empty.isEnabled = false
+            menu.addItem(empty)
+        } else {
+            let header = NSMenuItem(title: "Apple TVs", action: nil, keyEquivalent: "")
+            header.isEnabled = false
+            menu.addItem(header)
+
+            let currentId = connection?.currentDevice?.id
+            for device in devices {
+                let isCurrent = device.id == currentId && connection?.state == .connected
+                let isPaired = device.isPaired
+
+                let suffix: String
+                if isCurrent      { suffix = "  •  connected" }
+                else if isPaired  { suffix = "  •  paired" }
+                else              { suffix = "  •  click to pair" }
+
+                let item = NSMenuItem(
+                    title: "\(device.name)\(suffix)",
+                    action: isCurrent ? nil : #selector(deviceSelected(_:)),
+                    keyEquivalent: ""
+                )
+                if isCurrent {
+                    item.state = .on
+                    item.isEnabled = false
+                } else {
+                    item.target = self
+                    item.representedObject = device
+                }
+                menu.addItem(item)
+            }
+        }
+        menu.addItem(.separator())
+
+        // ── Connected-only actions ────────────────────────────────────────
+        if connection?.state == .connected {
+            let refresh = NSMenuItem(title: "Refresh App List",
+                                     action: #selector(refreshAppList), keyEquivalent: "")
+            refresh.target = self
+            menu.addItem(refresh)
+
+            let disconnect = NSMenuItem(title: "Disconnect",
+                                        action: #selector(disconnect), keyEquivalent: "")
+            disconnect.target = self
+            menu.addItem(disconnect)
+
+            menu.addItem(.separator())
+        }
+
+        // ── App-level actions ─────────────────────────────────────────────
         let about = NSMenuItem(title: "About Apple TV Remote",
                                action: #selector(showAbout), keyEquivalent: "")
         about.target = self
         menu.addItem(about)
 
-        menu.addItem(.separator())
-
-        // Show Main Window
-        let show = NSMenuItem(title: "Show Main Window",
-                              action: #selector(showMainWindow), keyEquivalent: "")
-        show.target = self
-        menu.addItem(show)
-
-        // Keyboard Shortcuts
         let shortcuts = NSMenuItem(title: "Keyboard Shortcuts…",
                                    action: #selector(showKeyboardShortcuts), keyEquivalent: "")
         shortcuts.target = self
         menu.addItem(shortcuts)
 
-        menu.addItem(.separator())
-
-        // Refresh App List (only when connected)
-        if connection?.state == .connected {
-            let refresh = NSMenuItem(title: "Refresh App List",
-                                    action: #selector(refreshAppList), keyEquivalent: "")
-            refresh.target = self
-            menu.addItem(refresh)
-            menu.addItem(.separator())
-        }
-
-        // Launch at Startup
         let launch = NSMenuItem(title: "Launch at Startup",
                                 action: #selector(toggleLaunchAtStartup), keyEquivalent: "")
         launch.target = self
@@ -168,23 +232,33 @@ final class MenuBarController: NSObject, NSPopoverDelegate, NSMenuDelegate {
 
         menu.addItem(.separator())
 
-        // Quit
         let quit = NSMenuItem(title: "Quit Apple TV Remote",
                               action: #selector(NSApplication.terminate(_:)), keyEquivalent: "")
         menu.addItem(quit)
 
-        // Temporarily assign the menu so the status item shows it anchored correctly.
-        statusItem?.menu = menu
-        statusItem?.button?.performClick(nil)
+        self.statusItem?.menu = menu
+        self.statusItem?.button?.performClick(nil)
     }
 
-    // Called by NSMenuDelegate when the menu closes so left-click continues to show the popover.
     nonisolated func menuDidClose(_ menu: NSMenu) {
         Task { @MainActor in self.statusItem?.menu = nil }
     }
 
-    @objc private func showMainWindow(_ sender: Any?) {
+    // MARK: - Menu actions
+
+    @objc private func deviceSelected(_ sender: NSMenuItem) {
+        guard let device = sender.representedObject as? AppleTVDevice else { return }
+        connection?.wakeAndConnect(to: device)
+        // Open the popover so the user sees the pairing UI if a PIN is needed.
         openMainWindow()
+    }
+
+    @objc private func refreshAppList(_ sender: Any?) {
+        connection?.fetchApps()
+    }
+
+    @objc private func disconnect(_ sender: Any?) {
+        connection?.disconnect()
     }
 
     @objc private func showKeyboardShortcuts(_ sender: Any?) {
@@ -223,104 +297,5 @@ final class MenuBarController: NSObject, NSPopoverDelegate, NSMenuDelegate {
         } catch {
             Log.app.fail("Launch at startup toggle failed: \(error)")
         }
-    }
-
-    @objc private func refreshAppList(_ sender: Any?) {
-        connection?.fetchApps()
-    }
-}
-
-// MARK: - Menu bar remote view
-
-struct MenuBarRemoteView: View {
-    @EnvironmentObject var discovery:   DeviceDiscovery
-    @EnvironmentObject var connection:  CompanionConnection
-    @EnvironmentObject var reconnector: AutoReconnector
-
-    var body: some View {
-        Group {
-            if connection.state == .connected ||
-               (reconnector.hasEverConnected && !connection.userInitiatedDisconnect) {
-                connectedView
-            } else {
-                disconnectedView
-            }
-        }
-        .frame(width: 220)
-    }
-
-    // ── Connected ─────────────────────────────────────────────────────────────
-
-    private var connectedView: some View {
-        VStack(spacing: 14) {
-            Text(connection.currentDevice?.name ?? "Apple TV")
-                .font(.subheadline.weight(.semibold))
-                .lineLimit(1)
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-            ZStack {
-                Circle()
-                    .fill(.quaternary)
-                    .frame(width: 148, height: 148)
-                VStack(spacing: 2) {
-                    RemoteButton(label: "chevron.up",    action: { connection.send(.up) })
-                    HStack(spacing: 2) {
-                        RemoteButton(label: "chevron.left",  action: { connection.send(.left) })
-                        RemoteButton(label: "circle.fill",    action: { connection.send(.select) }, size: 48)
-                        RemoteButton(label: "chevron.right", action: { connection.send(.right) })
-                    }
-                    RemoteButton(label: "chevron.down",  action: { connection.send(.down) })
-                }
-            }
-
-            HStack(spacing: 28) {
-                LabeledRemoteButton(sfSymbol: "chevron.backward", label: "Back") {
-                    connection.send(.menu)
-                }
-                LabeledRemoteButton(sfSymbol: "playpause.fill", label: "Play/Pause") {
-                    connection.send(.playPause)
-                }
-                LabeledRemoteButton(sfSymbol: "app.fill", label: "Home") {
-                    connection.send(.home)
-                } longPressAction: {
-                    connection.sendLongPress(.home)
-                }
-            }
-
-            HStack(spacing: 20) {
-                LabeledRemoteButton(sfSymbol: "speaker.minus.fill", label: "Vol −") {
-                    connection.send(.volumeDown)
-                }
-                LabeledRemoteButton(sfSymbol: "speaker.plus.fill", label: "Vol +") {
-                    connection.send(.volumeUp)
-                }
-            }
-
-            Button("Open Full Remote…") { openMainWindow() }
-                .font(.caption)
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-        }
-        .padding(16)
-    }
-
-    // ── Disconnected ──────────────────────────────────────────────────────────
-
-    private var disconnectedView: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "appletv.fill")
-                .font(.system(size: 32))
-                .foregroundStyle(.tertiary)
-            Text("No Apple TV Connected")
-                .font(.subheadline.weight(.medium))
-            Button("Open Remote") { openMainWindow() }
-                .buttonStyle(.borderedProminent)
-        }
-        .padding(24)
-        .frame(maxWidth: .infinity)
-    }
-
-    private func openMainWindow() {
-        MenuBarController.shared.openMainWindow()
     }
 }
