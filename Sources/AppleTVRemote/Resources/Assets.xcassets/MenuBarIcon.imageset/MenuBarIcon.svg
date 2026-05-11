@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- Siri Remote silhouette: tall rounded body with clickpad and button rows.
+       Designed as a template image for the macOS menu bar:
+       single color (black), no gradients, ~18pt readable. -->
+
+  <!-- Outer remote body: tall pill with rounded corners -->
+  <rect x="20" y="4" width="24" height="56" rx="8" ry="8"
+        fill="none" stroke="black" stroke-width="3"/>
+
+  <!-- Clickpad circle (top section) -->
+  <circle cx="32" cy="18" r="6"
+          fill="none" stroke="black" stroke-width="2.5"/>
+
+  <!-- Center select dot inside the clickpad -->
+  <circle cx="32" cy="18" r="1.6" fill="black"/>
+
+  <!-- Divider line between clickpad and button area -->
+  <line x1="24" y1="30" x2="40" y2="30"
+        stroke="black" stroke-width="1.5"/>
+
+  <!-- Button rows: two short horizontal bars -->
+  <line x1="26" y1="38" x2="38" y2="38"
+        stroke="black" stroke-width="2" stroke-linecap="round"/>
+  <line x1="26" y1="46" x2="38" y2="46"
+        stroke="black" stroke-width="2" stroke-linecap="round"/>
+
+  <!-- Bottom mic indicator dot -->
+  <circle cx="32" cy="54" r="1.6" fill="black"/>
+</svg>

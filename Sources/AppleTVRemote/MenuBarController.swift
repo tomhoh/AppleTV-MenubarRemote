@@ -37,9 +37,13 @@ final class MenuBarController: NSObject, NSPopoverDelegate, NSMenuDelegate {
         statusItem = item
         guard let button = item.button else { return }
 
-        let img = NSImage(systemSymbolName: "appletv.remote.gen2", accessibilityDescription: nil)
+        // Prefer our custom Siri-Remote silhouette from the asset catalog;
+        // fall back to SF Symbols if the bundle resource isn't found (e.g.
+        // when running outside the proper resource bundle layout).
+        let img = NSImage(named: NSImage.Name("MenuBarIcon"))
+                ?? Bundle.module.image(forResource: "MenuBarIcon")
+                ?? NSImage(systemSymbolName: "appletv.remote.gen2", accessibilityDescription: nil)
                 ?? NSImage(systemSymbolName: "tv.fill", accessibilityDescription: nil)
-                ?? NSImage(systemSymbolName: "tv",      accessibilityDescription: nil)
         img?.isTemplate = true
         img?.size = NSSize(width: 18, height: 18)
         button.image = img
