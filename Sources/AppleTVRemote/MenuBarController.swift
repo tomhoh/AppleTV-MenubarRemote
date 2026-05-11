@@ -37,13 +37,22 @@ final class MenuBarController: NSObject, NSPopoverDelegate, NSMenuDelegate {
         statusItem = item
         guard let button = item.button else { return }
 
-        // Prefer our custom Siri-Remote silhouette from the asset catalog;
-        // fall back to SF Symbols if the bundle resource isn't found (e.g.
-        // when running outside the proper resource bundle layout).
-        let img = NSImage(named: NSImage.Name("MenuBarIcon"))
-                ?? Bundle.module.image(forResource: "MenuBarIcon")
-                ?? NSImage(systemSymbolName: "appletv.remote.gen2", accessibilityDescription: nil)
-                ?? NSImage(systemSymbolName: "tv.fill", accessibilityDescription: nil)
+        // Custom Siri-Remote silhouette. SwiftPM doesn't run `actool`, so the
+        // `.xcassets` directory ships as raw files in the resource bundle —
+        // `NSImage(named:)` won't find the icon. Load the PDF directly by
+        // path instead, then fall back to SF Symbols if that fails.
+        let pdfURL = Bundle.module.url(
+            forResource: "MenuBarIcon",
+            withExtension: "pdf",
+            subdirectory: "Assets.xcassets/MenuBarIcon.imageset"
+        )
+        let img: NSImage?
+        if let url = pdfURL, let pdfImage = NSImage(contentsOf: url) {
+            img = pdfImage
+        } else {
+            img = NSImage(systemSymbolName: "appletv.remote.gen2", accessibilityDescription: nil)
+              ?? NSImage(systemSymbolName: "tv.fill", accessibilityDescription: nil)
+        }
         img?.isTemplate = true
         img?.size = NSSize(width: 18, height: 18)
         button.image = img
