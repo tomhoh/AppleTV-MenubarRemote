@@ -1,9 +1,22 @@
-# <img src="assets/icon.png" width="48" height="48" align="left" style="margin-right:10px"> Apple TV Remote
+# <picture><source media="(prefers-color-scheme: dark)" srcset="assets/icon-dark.png"><img src="assets/icon-light.png" width="48" height="48" align="left" style="margin-right:10px" alt=""></picture> Apple TV Remote
 
 A macOS menu-bar Apple TV remote. Click the icon, get a Siri Remote–style
 drop-down; tap, swipe, or use the trackpad to drive your Apple TV. No
 Python, no helper processes — pure Swift talking to Apple TVs over the
 reverse-engineered **Companion** and **MRP** protocols.
+
+> **Origin:** based on [**alokdhir/appletv-remote**](https://github.com/alokdhir/appletv-remote).
+> The protocol implementation (`AppleTVProtocol`), connection logic
+> (`CompanionConnection`, `DeviceDiscovery`, `AutoReconnector`), app
+> launcher backend, keyboard-input handling, and `atv` CLI all come from
+> upstream. **This fork's contribution is the UI**: the main-window +
+> sidebar layout was replaced with a compact menu-bar drop-down (the
+> Siri Remote–style face, slide-out app launcher panel, floating
+> text-input window, right-click device menu).
+
+<p align="center">
+  <img src="screenshots/remote-connected.png" alt="Remote dropped down from the menu bar" width="220">
+</p>
 
 ## Features
 
@@ -24,6 +37,31 @@ reverse-engineered **Companion** and **MRP** protocols.
   previously connected becomes reachable again.
 - **`atv` CLI companion** — scriptable control from the terminal (`atv u`,
   `atv home`, `atv launch com.apple.TVMovies`, etc.).
+
+## Screenshots
+
+<table>
+  <tr>
+    <td align="center" valign="top">
+      <img src="screenshots/remote-pairing.png" alt="Pairing view with discovered Apple TVs" width="220"><br>
+      <sub>Pairing view — pick a discovered Apple TV to start pairing.</sub>
+    </td>
+    <td align="center" valign="top">
+      <img src="screenshots/remote-connected.png" alt="Remote face once paired" width="220"><br>
+      <sub>Connected — Siri-Remote face with clickpad, button rows, power.</sub>
+    </td>
+    <td align="center" valign="top">
+      <img src="screenshots/right-click-menu.png" alt="Right-click context menu" width="220"><br>
+      <sub>Right-click the icon for the device list, paired/connected markers, one-click switching.</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" valign="top" colspan="3">
+      <img src="screenshots/app-launcher.png" alt="App launcher slide-out" width="500"><br>
+      <sub>App launcher slides out to the left; tap an app to launch on the TV.</sub>
+    </td>
+  </tr>
+</table>
 
 ## Install
 
@@ -185,7 +223,12 @@ using `AppleTVProtocol` directly.
 
 ## Acknowledgements
 
+- [**alokdhir/appletv-remote**](https://github.com/alokdhir/appletv-remote) —
+  the upstream project this fork is derived from. The entire Swift protocol
+  implementation, connection state machine, app launcher, text-input
+  notification flow, and CLI tool originate there. This fork only replaces
+  the GUI.
 - [pyatv](https://github.com/postlund/pyatv) — the protocol reference
-  implementations this Swift port followed.
+  implementations the upstream Swift port followed.
 - [BigInt](https://github.com/attaswift/BigInt) by Károly Lőrentey — SPM
   dependency used for SRP-6a big-integer math.
