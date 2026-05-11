@@ -1,120 +1,101 @@
 # <img src="assets/icon.png" width="48" height="48" align="left" style="margin-right:10px"> Apple TV Remote
 
-A macOS app that discovers and controls Apple TVs on the local network via the **Companion** and **Media Remote Protocol (MRP)** protocols. Includes a full-featured main window with device sidebar and remote control UI, and a scriptable `atv` CLI companion tool.
+A macOS menu-bar Apple TV remote. Click the icon, get a Siri Remote–style
+drop-down; tap, swipe, or use the trackpad to drive your Apple TV. No
+Python, no helper processes — pure Swift talking to Apple TVs over the
+reverse-engineered **Companion** and **MRP** protocols.
 
 ## Features
 
-- **Menu bar app** — lives in the menu bar; popover remote for quick access
-- **Main window** — collapsible device sidebar + remote control pane with D-pad, playback, volume, now-playing
-- **App launcher** — browse and launch apps installed on the Apple TV
-- **Keyboard text input** — type into active Apple TV text fields from the Mac
-- **`atv` CLI** — scriptable control from the terminal or shell scripts
-- **Auto-reconnect** — reconnects automatically when the Apple TV becomes reachable
-- **Keyboard shortcuts** — `⌃A` to open app grid, `R` to return to remote, arrow keys to navigate apps; full list in the menu-bar icon's right-click menu
-
-## Screenshots
-
-| Remote (`remote.png`) | Remote + sidebar (`remote with sidebar.png`) |
-|--------|-----------------|
-| <img src="screenshots/remote.png" width="316"> | ![Remote with sidebar](screenshots/remote%20with%20sidebar.png) |
-
-| App grid (`appgrid.png`) | App grid + sidebar (`appgrid with sidebar.png`) |
-|----------|--------------------|
-| ![App grid](screenshots/appgrid.png) | ![App grid with sidebar](screenshots/appgrid%20with%20sidebar.png) |
+- **Menu-bar drop-down** — Siri Remote face that drops from the menu bar.
+  Light + dark mode aware.
+- **Right-click context menu** — list of every discovered Apple TV with
+  ✓ for the connected one, "paired" / "click to pair" markers; one-click
+  switching between paired devices without re-entering a PIN.
+- **Trackpad gestures** — 2-finger swipe on the trackpad while the popover
+  is open sends directional input. Or click and drag across the clickpad.
+- **Power button**, **Siri hold-to-talk**, **volume rocker**, **play/pause**,
+  **home**, **back**.
+- **App launcher** — slide-out panel to the left of the remote; browse the
+  apps installed on the Apple TV, search, tap to launch.
+- **Keyboard text input** — when the Apple TV opens a text field, a small
+  floating window pops up; type into it and it appears on the TV.
+- **Auto-reconnect** — reconnects automatically when an Apple TV that was
+  previously connected becomes reachable again.
+- **`atv` CLI companion** — scriptable control from the terminal (`atv u`,
+  `atv home`, `atv launch com.apple.TVMovies`, etc.).
 
 ## Install
 
-Grab the latest signed + notarized DMG from the
-**[Releases page](https://github.com/alokdhir/appletv-remote/releases/latest)**.
+Grab the latest DMG from the
+[Releases page](https://github.com/alokdhir/appletv-remote/releases/latest).
 
 1. Download `AppleTVRemote-X.Y.Z.dmg`.
-2. Double click to mount and open
-3. Drag `AppleTVRemote.app` onto the `Applications` shortcut.
-4. *(Optional)* For the `atv` CLI: open a Terminal in the mounted DMG and run `./install.sh` — copies the app to `/Applications` and the CLI to `/usr/local/bin/atv` in one go.
-5. Launch from `/Applications` (or run `atv help` from the terminal).
+2. Double-click to mount. Drag **AppleTVRemote.app** onto the **Applications**
+   shortcut.
+3. First launch: the app is ad-hoc signed (no Apple Developer Program),
+   so macOS Gatekeeper will refuse to open it. Two ways past it:
+   - Right-click `AppleTVRemote.app` in `/Applications` → **Open** →
+     confirm in the dialog. macOS remembers the decision.
+   - Or run once: `xattr -dr com.apple.quarantine /Applications/AppleTVRemote.app`
+4. *(Optional `atv` CLI)*: open a Terminal in the mounted DMG and run
+   `./install.sh` — copies the app to `/Applications` and the CLI to
+   `/usr/local/bin/atv` in one go.
+
+## First-run pairing
+
+1. Click the **remote icon** in the menu bar (top-right of the screen).
+2. The popover drops down with "Pair a device to get started." It auto-scans
+   your network via Bonjour.
+3. Tap a discovered Apple TV. The Apple TV will display a 4-digit PIN
+   on screen.
+4. Type the PIN into the popover. It auto-submits on the 4th digit.
+5. Credentials are saved (see [Credential storage](#credential-storage));
+   next launch the app auto-connects to the last-used device.
+
+## Usage
+
+- **Left-click** the menu-bar icon → remote drops down.
+- **Right-click** → context menu with the device list, "Refresh App List",
+  "Disconnect", "About", "Keyboard Shortcuts…", "Launch at Startup", "Quit".
+- **Tap clickpad** ring → directional press. **Tap centre** → select.
+  **Click and drag** across the clickpad → continuous direction (one
+  press per ~22pt of drag).
+- **2-finger trackpad swipe** anywhere on the trackpad while the popover
+  is open → directional input. Mouse wheel is intentionally ignored.
+- **Top-right power button** → sleeps the Apple TV. Any subsequent action
+  wakes it automatically (Wake-on-LAN if needed).
+- **Mic button** (hold) → Siri.
+- **Apps button** (square grid icon in the second row) → app-launcher
+  slide-out from the left of the remote.
 
 ## Requirements
 
 - macOS 13+
-- Apple TV on the same local network
-- Xcode 26 / Swift 6 *(only if you want to build from source)*
-
-### Optional dependencies
-
-- **[terminal-notifier](https://github.com/julienXX/terminal-notifier)** — improves keyboard-input notifications. Without it the app falls back to `osascript display notification`, which appears attributed to "Script Editor" and opens Script Editor when clicked. With terminal-notifier, notifications show the AppleTVRemote icon and clicking focuses the app.
-
-  ```bash
-  brew install terminal-notifier
-  ```
-
-  > **Note:** The first time a notification fires, macOS will open System Settings → Notifications and ask you to explicitly allow terminal-notifier to send notifications. Do that once and notifications will work from then on.
+- Apple TV (HD / 4K) on the same local network
+- Xcode 26 / Swift 6 *(only to build from source)*
 
 ## Building from source
 
-If you'd rather build it yourself than use the prebuilt DMG above.
-
-### Swift (recommended — builds everything)
+The Xcode project is a thin wrapper around `Package.swift` — `swift build`
+is the canonical build path; the script below also wraps the binary into a
+real `.app` bundle.
 
 ```bash
-# Debug build (fast, for development)
+# Debug build (fast, no .app wrap)
 swift build
 
-# Release build (optimised, for daily use)
-swift build -c release
-
-# Run tests
+# Tests
 swift test
+
+# Release .app + DMG with drag-to-Applications layout
+scripts/build-dmg.sh        # → dist/AppleTVRemote-<date>.dmg (~6 MB)
 ```
 
-Builds the GUI app, the `atv` CLI, all modules, and tests.
-
-### Xcode
-
-```bash
-xcodebuild -project AppleTVRemote.xcodeproj -scheme AppleTVRemote -configuration Release
-```
-
-Builds only the `AppleTVRemote.app` GUI target. Use this path for archiving, signing, and notarizing for distribution.
-
-### Installing a local build
-
-After `swift build -c release`, copy the binaries into place:
-
-```bash
-cp -f .build/release/AppleTVRemote /Applications/AppleTVRemote.app/Contents/MacOS/AppleTVRemote
-cp -rf .build/release/AppleTVRemote_AppleTVRemote.bundle /Applications/AppleTVRemote.app/Contents/Resources/
-cp -f .build/release/atv /usr/local/bin/atv
-codesign --force --deep --sign - /Applications/AppleTVRemote.app
-```
-
-> **Note:** Always copy both the binary *and* the `.bundle` — the bundle contains
-> bundled app icons and other resources that SwiftUI's `Bundle.module` reads at runtime.
-
-### Cutting a release (maintainer only)
-
-The full signed + notarized DMG pipeline is automated in `scripts/`.
-
-```bash
-# Build a signed + notarized DMG, no upload.
-scripts/build-dmg.sh
-
-# End-to-end: tag, build, push, attach to GitHub release.
-scripts/release.sh v1.2.0
-```
-
-`build-dmg.sh` auto-detects the Developer ID Application identity in your
-keychain and the `appletv-remote-notarization` notarytool profile. First-time
-setup (cert, app-specific password, `notarytool store-credentials`) is
-described in the script header.
-
-## Pairing
-
-Launch the app, select your Apple TV from the sidebar, and click **Connect**. The Apple TV will display a 4-digit PIN — enter it in the pairing dialog. Credentials are saved automatically.
-
-```bash
-# Or pair from the CLI
-atv pair "Living Room"
-```
+By default `build-dmg.sh` produces an **unsigned + ad-hoc** build — no
+Apple Developer Program subscription needed. Pass a real Developer ID and
+notarytool profile via env vars to opt into a signed + notarized build
+(see the script header for examples).
 
 ## `atv` CLI Reference
 
@@ -150,44 +131,18 @@ atv --standalone apps
 atv --standalone --device "Living Room" l
 ```
 
-## Keyboard Controls
+## Credential storage
 
-### Remote control pane
-
-| Key | Action |
-|-----|--------|
-| `↑ ↓ ← →` | D-pad up / down / left / right |
-| `⇧ ↑ ↓ ← →` | Trackpad swipe up / down / left / right |
-| `Return` | Select (D-pad centre) |
-| `Space` | Play / Pause |
-| `⌃ A` | Open app launcher |
-| `⌃ H` | Home _(hold for Control Center)_ |
-| `⌃ M` | Menu / Back _(hold for long-press)_ |
-| `⌃ P` | Play / Pause |
-| `⌥ ↑` / `⌥ ↓` | Volume up / down |
-| `⌫ Backspace` | Delete last character _(when Apple TV text field is active)_ |
-
-The letter shortcuts require Control so accidental key-presses don't fire commands at the Apple TV when remote-pane focus has drifted while you're typing elsewhere. The full list is also reachable in-app via **Keyboard Shortcuts…** in the menu-bar icon's right-click menu.
-
-### App launcher pane
-
-| Key | Action |
-|-----|--------|
-| `↑ ↓ ← →` | Navigate app grid |
-| `Return` | Launch selected app |
-| `Tab` | Focus search field |
-| `R` | Return to remote |
-
-## Credential Storage
-
-Pairing credentials (Ed25519 long-term key pair + Apple TV public key) are stored as JSON in:
+Pairing credentials (Ed25519 long-term key pair + Apple TV public key) are
+stored as JSON in:
 
 ```
 ~/Library/Application Support/AppleTVRemote/<device-id>.json         # Companion
 ~/Library/Application Support/AppleTVRemote/<device-id>.airplay.json # AirPlay
 ```
 
-**Security note:** The Ed25519 private key (`ltsk`) is stored in plaintext. The files are written with `0600` permissions (owner read/write only).
+**Security note:** The Ed25519 private key (`ltsk`) is stored in plaintext.
+The files are written with `0600` permissions (owner read/write only).
 
 ## Architecture
 
@@ -195,77 +150,42 @@ Pairing credentials (Ed25519 long-term key pair + Apple TV public key) are store
 
 | File | Role |
 |------|------|
-| `AppleTVRemoteApp.swift` | `@main` entry point; owns `DeviceDiscovery`, `AutoReconnector` |
-| `DeviceDiscovery.swift` | Bonjour browser (`_companion-link._tcp`) using `NWBrowser` |
-| `ContentView.swift` | Root split layout (collapsible sidebar + detail) |
-| `DeviceListView.swift` | Sidebar: device list, auto-connect toggles |
-| `RemoteControlView.swift` | D-pad, playback, volume, now-playing card, app launcher toggle |
-| `AppLauncherView.swift` | App grid with search, keyboard navigation, responsive columns |
-| `MenuBarController.swift` | Menu bar status item, popover, right-click menu |
-| `AppIconCache.swift` | Fetches and caches app icons from iTunes + bundled system icons |
-| `KeyboardNotificationManager.swift` | Manages keyboard-input notifications for Apple TV remote requests |
-| `PopoverActivationGuard.swift` | Suppresses the first tap that activates the popover window |
-| `VisualEffectBackground.swift` | NSVisualEffectView wrapper for SwiftUI translucency |
-| `CompanionConnection.swift` | App-layer orchestrator: TCP connect/disconnect, WoL, pairing delegation, `@Published` state for SwiftUI |
-| `IPCServer.swift` | Unix socket IPC server for `atv` CLI |
-| `AutoReconnector.swift` | Watches for unexpected disconnects and retries |
-| `WindowManagement.swift` | NSWindow setup: translucency, focus-fade, hide-on-close |
+| `AppleTVRemoteApp.swift` | `@main` entry point; menu-bar-only (no `WindowGroup`); owns `DeviceDiscovery`, `CompanionConnection`, `AutoConnectStore`, `AutoReconnector` |
+| `MenuBarController.swift` | `NSStatusItem` + `NSPopover` host; right-click context menu; observes `RootView` size-change notification to resize the popover when the app-launcher slide-out toggles |
+| `DeviceDiscovery.swift` | Bonjour browser (`_companion-link._tcp`) via `NWBrowser` |
+| `CompanionConnection.swift` | Connection state machine, pair-setup / pair-verify, command dispatch |
+| `AutoReconnector.swift` + `AutoConnectStore.swift` | Reconnect-when-reachable behaviour |
+| `RootView.swift` | Top-level popover router. Picks pairing UI vs remote UI from `connection.state`; manages app-launcher slide-out |
+| `RemoteView.swift` | Aluminum-bodied Siri Remote face |
+| `ClickpadView.swift` | Circular clickpad with tap-quadrant + drag-swipe gestures |
+| `RemoteButtonsView.swift` | Back / Home / Mic / Play-Pause / Apps / Volume rocker |
+| `PairingView.swift` | Disconnected device list + PIN entry |
+| `AppLauncherPanel.swift` | Slide-out app grid driven by `connection.appList` + `AppIconCache` |
+| `TextInputWindow.swift` | Floating window opened when the Apple TV opens a text field |
+| `RemoteSession.swift` | Thin bridge from view-layer commands to `CompanionConnection` API |
+| `RemoteTheme.swift` | Visual constants (sizes, gradients, animations) |
+| `IPCServer.swift` | Unix-socket IPC for the `atv` CLI |
 
-### `Sources/AppleTVProtocol/` — Core protocol library (reusable, no UI dependencies)
+### `Sources/AppleTVProtocol/` — protocol implementation
 
-`AppleTVProtocol` has no dependency on SwiftUI, AppKit, or this app. It can be embedded in other Swift projects (CLI tools, server-side daemons, other apps) to drive Apple TV Companion sessions directly.
+The cryptography (SRP-6a / Ed25519 / Curve25519 / ChaCha20-Poly1305), TLV8 /
+OPACK / protobuf wire formats, MRP and Companion frame layers, AirPlay
+tunnelling, and credential storage. ~6 KLOC of Swift, no external deps
+beyond `BigInt`.
 
-| File | Role |
-|------|------|
-| `AppleTVDevice.swift` | Device model, `ConnectionState`, `RemoteCommand` enums |
-| `CompanionSession.swift` | Live session: socket I/O, frame dispatch, keepalive, all feature send methods |
-| `CompanionFrame.swift` | Wire frame encode/decode |
-| `CompanionPairVerify.swift` | HAP pair-verify over Companion protocol framing |
-| `PairingFlow.swift` | Pair-setup (SRP-6a) state machine |
-| `EncryptedFrameTransport.swift` | ChaCha20-Poly1305 seal/open for E_OPACK frames |
-| `OPACK.swift` | OPACK binary encoder/decoder |
-| `NowPlayingInfo.swift` | `NowPlayingInfo` struct: now-playing snapshot, live-elapsed interpolation, album filter |
-| `NowPlayingMerge.swift` | `NowPlayingMergeInput` / `NowPlayingMergeResult` and `NowPlayingInfo.merging(_:)` |
-| `MRPDecoder.swift` | Decodes MRP now-playing protobuf messages |
-| `MRPMessage.swift` | Constructs MRP wire messages (varint-length-prefixed protobuf frames) |
-| `MRPDataChannel.swift` | MRP data channel over AirPlay connection |
-| `AirPlayTunnel.swift` | AirPlay MRP tunnel for real-time now-playing |
-| `AirPlayHTTP.swift` | Minimal HTTP/1.1 client for AirPlay long-lived TCP connections |
-| `AirPlayPairing.swift` | AirPlay pair-setup and pair-verify (SRP + TLV8) |
-| `AirPlayEventChannel.swift` | AirPlay event channel over established session |
-| `EncryptedAirPlayRTSP.swift` | RTSP-over-ChaCha20-Poly1305 transport post pair-verify |
-| `HAPPairing.swift` / `SRPClient.swift` | HAP pairing crypto |
-| `HAPSession.swift` | Bidirectional ChaCha20-Poly1305 frame codec for AirPlay sockets |
-| `TLV8.swift` | HAP TLV8 encoder/decoder |
-| `CredentialStore.swift` | Pairing credentials persisted as JSON in Application Support |
-| `MACStore.swift` | Persists Apple TV MAC addresses for Wake-on-LAN when device is asleep |
-| `WakeOnLAN.swift` | Magic packet broadcast |
-| `RTITextOperations.swift` | RTI binary plist encoder for text input |
-| `BinaryPlist.swift` | Minimal binary plist (bplist00) writer for NSKeyedArchiver UID references |
-| `CryptoUtils.swift` | Shared crypto utilities (Data extensions) |
-| `PrimaryInterface.swift` | Resolves the primary network interface for socket binding |
+### `Sources/atv/` — CLI
 
-### `Sources/AppleTVIPC/` — Shared IPC wire types
+Standalone executable that either talks to the running GUI app via the
+Unix-socket `IPCServer`, or (with `--standalone`) opens its own connection
+using `AppleTVProtocol` directly.
 
-| File | Role |
-|------|------|
-| `IPCProtocol.swift` | IPC protocol between app and `atv` CLI |
+## License
 
-### Protocol overview
-
-- Apple TVs advertise `_companion-link._tcp` via Bonjour; port is resolved dynamically
-- Pairing: SRP-6a (HAP-style) + Ed25519 long-term keys, OPACK-framed
-- Session: ChaCha20-Poly1305 encrypted OPACK frames over raw TCP
-- App launcher: `FetchLaunchableApplicationsEvent` over the established Companion session
-- AirPlay MRP tunnel: encrypted RTSP → DataStream → MRP protobuf for now-playing metadata
+[MIT](LICENSE).
 
 ## Acknowledgements
 
-This project would not have been possible without **[pyatv](https://github.com/postlund/pyatv)** by [Pierre Ståhl](https://github.com/postlund) and contributors.
-
-pyatv is an open-source Python library that reverse-engineered and documented Apple's proprietary Apple TV protocols — including the Companion protocol, OPACK binary format, HAP-style pairing, and the AirPlay MRP tunnel. It served as the primary protocol reference throughout the development of this project.
-
-Many thanks to the pyatv project and contributors for their work documenting undocumented protocols and making that knowledge freely available.
-
-> pyatv is licensed under the MIT License.
-> https://github.com/postlund/pyatv
+- [pyatv](https://github.com/postlund/pyatv) — the protocol reference
+  implementations this Swift port followed.
+- [BigInt](https://github.com/attaswift/BigInt) by Károly Lőrentey — SPM
+  dependency used for SRP-6a big-integer math.

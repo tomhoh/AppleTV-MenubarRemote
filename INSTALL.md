@@ -6,7 +6,7 @@
 
 | What | Where | Purpose |
 |------|-------|---------|
-| `AppleTVRemote.app` | `/Applications/` | The menu bar + main window app |
+| `AppleTVRemote.app` | `/Applications/` | The menu-bar app (drop-down remote) |
 | `atv` | `/usr/local/bin/atv` | Command-line control tool |
 
 If AppleTVRemote is already running it will be stopped first. You can relaunch it from `/Applications` after the install completes.
