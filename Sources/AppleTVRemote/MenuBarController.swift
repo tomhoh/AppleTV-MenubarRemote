@@ -20,6 +20,12 @@ final class MenuBarController: NSObject, NSPopoverDelegate, NSMenuDelegate {
     private var stateCancellable: AnyCancellable?
     private var sizeObserver:     NSObjectProtocol?
 
+    // Trackpad swipe-to-arrow state. Active only while the popover is open.
+    private var scrollMonitor: Any?
+    private var scrollAccumX: CGFloat = 0
+    private var scrollAccumY: CGFloat = 0
+    private let scrollSwipeThreshold: CGFloat = 35
+
     private weak var connection:  CompanionConnection?
     private weak var discovery:   DeviceDiscovery?
     private weak var autoConnect: AutoConnectStore?
@@ -107,10 +113,63 @@ final class MenuBarController: NSObject, NSPopoverDelegate, NSMenuDelegate {
         }
     }
 
+    nonisolated func popoverDidShow(_ notification: Notification) {
+        Task { @MainActor in self.installScrollMonitor() }
+    }
+
     nonisolated func popoverDidClose(_ notification: Notification) {
         Task { @MainActor in
+            self.removeScrollMonitor()
             NSApp.deactivate()
         }
+    }
+
+    // MARK: - Trackpad swipe-to-arrow
+
+    /// Listens for 2-finger trackpad scroll events while the popover is open
+    /// and translates accumulated motion into directional commands.
+    private func installScrollMonitor() {
+        guard scrollMonitor == nil else { return }
+        scrollAccumX = 0
+        scrollAccumY = 0
+        scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+            guard let self else { return event }
+            // Only react to trackpad-style precise deltas. Mouse wheels emit
+            // imprecise deltas that would feel jittery here.
+            guard event.hasPreciseScrollingDeltas else { return event }
+            Task { @MainActor in self.handleTrackpadScroll(event) }
+            return nil  // consume — don't let it bubble
+        }
+    }
+
+    private func removeScrollMonitor() {
+        if let monitor = scrollMonitor {
+            NSEvent.removeMonitor(monitor)
+            scrollMonitor = nil
+        }
+        scrollAccumX = 0
+        scrollAccumY = 0
+    }
+
+    private func handleTrackpadScroll(_ event: NSEvent) {
+        scrollAccumX += event.scrollingDeltaX
+        scrollAccumY += event.scrollingDeltaY
+
+        let ax = abs(scrollAccumX), ay = abs(scrollAccumY)
+        guard max(ax, ay) >= scrollSwipeThreshold else { return }
+
+        let command: AppleTVProtocol.RemoteCommand
+        if ax >= ay {
+            // Horizontal: positive deltaX = finger swept right → .right.
+            command = scrollAccumX > 0 ? .right : .left
+            scrollAccumX = 0
+        } else {
+            // Vertical: positive scrollingDeltaY = content scrolled down → finger swept up → .up.
+            // Empirically reversed in user testing — match what feels right.
+            command = scrollAccumY > 0 ? .down : .up
+            scrollAccumY = 0
+        }
+        session?.dispatch(command)
     }
 
     @objc private func toggle(_ sender: AnyObject?) {
