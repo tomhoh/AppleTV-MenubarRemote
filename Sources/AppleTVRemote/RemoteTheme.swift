@@ -113,7 +113,7 @@ enum RemoteTheme {
     enum Glyph {
         static let back = "chevron.backward"
         static let home = "tv"
-        static let mic = "mic.fill"
+        static let appSwitcher = "rectangle.stack.fill"
         static let playPause = "playpause.fill"
         static let volumeUp = "speaker.wave.3.fill"
         static let volumeDown = "speaker.wave.1.fill"

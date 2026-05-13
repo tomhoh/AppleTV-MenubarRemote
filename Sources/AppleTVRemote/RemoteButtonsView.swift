@@ -11,11 +11,11 @@ struct RemoteButtonsView: View {
     var body: some View {
         VStack(spacing: RemoteTheme.buttonRowSpacing) {
             HStack {
-                glyphButton(.menu, symbol: RemoteTheme.Glyph.back)
+                BackButton()
                 Spacer()
                 glyphButton(.home, symbol: RemoteTheme.Glyph.home)
                 Spacer()
-                SiriHoldButton()
+                AppSwitcherButton()
             }
             .padding(.horizontal, RemoteTheme.buttonRowHorizontalPadding)
 
@@ -62,44 +62,67 @@ struct RemoteButtonsView: View {
     }
 }
 
-// MARK: - Siri (hold to talk)
+// MARK: - App Switcher (long-press → home with InputAction.Hold)
 
-private struct SiriHoldButton: View {
+private struct AppSwitcherButton: View {
     @EnvironmentObject private var session: RemoteSession
-    @State private var isHeld = false
+    @State private var isPressed = false
 
     var body: some View {
-        Image(systemName: RemoteTheme.Glyph.mic)
+        Button {
+            session.dispatchAppSwitcher()
+        } label: {
+            Image(systemName: RemoteTheme.Glyph.appSwitcher)
+                .font(RemoteTheme.buttonGlyphFont)
+                .foregroundStyle(RemoteTheme.buttonGlyphTint)
+                .frame(width: RemoteTheme.buttonSize,
+                       height: RemoteTheme.buttonSize)
+                .background(
+                    RoundedRectangle(cornerRadius: RemoteTheme.buttonCornerRadius)
+                        .fill(RemoteTheme.buttonMaterial)
+                )
+        }
+        .buttonStyle(PressableButtonStyle())
+        .help("App Switcher (long-press home)")
+    }
+}
+
+// MARK: - Back (tap = menu / back, long-press = screensaver)
+
+private struct BackButton: View {
+    @EnvironmentObject private var session: RemoteSession
+    @State private var isPressed = false
+    @State private var longPressFired = false
+
+    var body: some View {
+        Image(systemName: RemoteTheme.Glyph.back)
             .font(RemoteTheme.buttonGlyphFont)
-            .foregroundStyle(isHeld ? .white : RemoteTheme.buttonGlyphTint)
+            .foregroundStyle(RemoteTheme.buttonGlyphTint)
             .frame(width: RemoteTheme.buttonSize,
                    height: RemoteTheme.buttonSize)
-            .background(background)
-            .scaleEffect(isHeld ? RemoteTheme.pressedScale : 1.0)
-            .animation(RemoteTheme.pressAnimation, value: isHeld)
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { _ in
-                        guard !isHeld else { return }
-                        isHeld = true
-                        session.dispatchSiri()
-                    }
+            .background(
+                RoundedRectangle(cornerRadius: RemoteTheme.buttonCornerRadius)
+                    .fill(RemoteTheme.buttonMaterial)
+            )
+            .scaleEffect(isPressed ? RemoteTheme.pressedScale : 1.0)
+            .animation(RemoteTheme.pressAnimation, value: isPressed)
+            .simultaneousGesture(
+                LongPressGesture(minimumDuration: 0.5)
                     .onEnded { _ in
-                        guard isHeld else { return }
-                        isHeld = false
+                        longPressFired = true
+                        session.dispatchScreensaver()
                     }
             )
-    }
-
-    @ViewBuilder
-    private var background: some View {
-        if isHeld {
-            RoundedRectangle(cornerRadius: RemoteTheme.buttonCornerRadius)
-                .fill(RemoteTheme.siriPulseGradient)
-        } else {
-            RoundedRectangle(cornerRadius: RemoteTheme.buttonCornerRadius)
-                .fill(RemoteTheme.buttonMaterial)
-        }
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { _ in isPressed = true }
+                    .onEnded { _ in
+                        isPressed = false
+                        if !longPressFired { session.dispatch(.menu) }
+                        longPressFired = false
+                    }
+            )
+            .help("Back (long-press for screensaver)")
     }
 }
 

@@ -50,6 +50,6 @@ private struct PowerButton: View {
                                                 lineWidth: 0.5))
         }
         .buttonStyle(PressableButtonStyle())
-        .help("Sleep Apple TV")
+        .help("Toggle Apple TV power (sleep / wake)")
     }
 }

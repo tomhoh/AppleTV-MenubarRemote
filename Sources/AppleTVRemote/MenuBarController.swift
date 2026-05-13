@@ -24,19 +24,17 @@ final class MenuBarController: NSObject, NSPopoverDelegate, NSMenuDelegate {
     private var scrollMonitor: Any?
     private var scrollAccumX: CGFloat = 0
     private var scrollAccumY: CGFloat = 0
-    private let scrollSwipeThreshold: CGFloat = 35
+    private let scrollSwipeThreshold: CGFloat = 60
 
-    // Sustained-swipe escalation: after the user fires this many consecutive
-    // arrow steps in the same direction within `swipeChainWindow` seconds,
-    // we switch from discrete `RemoteCommand` presses to the Companion
-    // protocol's `sendSwipe` gesture (the "trackpad flick" tvOS interprets
-    // as a fast/momentum scroll — what the Siri Remote does when you click
-    // and swipe).
-    private var lastSwipeDirection: TrackpadDirection?
-    private var lastSwipeTime: TimeInterval = 0
-    private var sustainedSwipeCount: Int = 0
-    private let sustainedSwipeAfter: Int = 2          // 3rd same-direction fire switches to gesture
-    private let swipeChainWindow: TimeInterval = 0.5  // must be within this gap to count as sustained
+    // Per-session capture of the Option modifier so a mid-swipe modifier
+    // release doesn't switch us back to discrete arrows partway through.
+    private var scrollSessionOption: Bool = false
+
+    // Rate-limit Option-held swipes — each `sendSwipe` is ~300ms of
+    // interleaved touch events; firing them too fast causes overlapping
+    // touch sessions on the tvOS side and subsequent swipes get dropped.
+    private var lastOptionSwipeTime: TimeInterval = 0
+    private let optionSwipeMinInterval: TimeInterval = 0.4
 
     private weak var connection:  CompanionConnection?
     private weak var discovery:   DeviceDiscovery?
@@ -152,19 +150,14 @@ final class MenuBarController: NSObject, NSPopoverDelegate, NSMenuDelegate {
         ) { [weak self] event in
             guard let self else { return event }
 
-            // When the app-launcher slide-out is visible the popover is
-            // ~3× wider; in that mode the trackpad-to-Apple-TV behaviour
-            // would fight SwiftUI's ScrollView (apps grid) and the
-            // launcher's tap targets. Pass events through so the launcher
-            // scrolls and clicks normally; trackpad-to-TV resumes when
-            // the launcher is closed and the popover snaps back.
-            if let pop = self.popover,
-               pop.contentSize.width > RemoteTheme.popoverWidth + 20 {
-                return event
-            }
-
             switch event.type {
             case .scrollWheel:
+                // Skip when the launcher slide-out is open so the apps
+                // grid's ScrollView can receive the events naturally.
+                if let pop = self.popover,
+                   pop.contentSize.width > RemoteTheme.popoverWidth + 20 {
+                    return event
+                }
                 // Only react to trackpad-style precise deltas. Mouse wheels
                 // emit imprecise deltas that would feel jittery here.
                 guard event.hasPreciseScrollingDeltas else { return event }
@@ -194,71 +187,66 @@ final class MenuBarController: NSObject, NSPopoverDelegate, NSMenuDelegate {
         }
         scrollAccumX = 0
         scrollAccumY = 0
-        lastSwipeDirection = nil
-        lastSwipeTime = 0
-        sustainedSwipeCount = 0
-    }
-
-    private enum TrackpadDirection {
-        case up, down, left, right
-
-        var asRemoteCommand: AppleTVProtocol.RemoteCommand {
-            switch self {
-            case .up: return .up
-            case .down: return .down
-            case .left: return .left
-            case .right: return .right
-            }
-        }
-
-        var asSwipeDirection: AppleTVProtocol.SwipeDirection {
-            switch self {
-            case .up: return .up
-            case .down: return .down
-            case .left: return .left
-            case .right: return .right
-            }
-        }
     }
 
     private func handleTrackpadScroll(_ event: NSEvent) {
+        // Ignore momentum (post-release) events. We only act on actual
+        // finger movement so the gesture has a clear start and end.
+        if event.momentumPhase != [] { return }
+
+        // Session lifecycle via NSEvent.phase:
+        //   .began    → reset accumulator + capture Option state for the session
+        //   .ended/.cancelled → reset and stop
+        // Capturing Option at .began protects against the modifier being
+        // released mid-swipe (which would otherwise flip us back to arrows).
+        if event.phase.contains(.began) {
+            scrollAccumX = 0
+            scrollAccumY = 0
+            scrollSessionOption = event.modifierFlags
+                .intersection(.deviceIndependentFlagsMask)
+                .contains(.option)
+        }
+        if event.phase.contains(.ended) || event.phase.contains(.cancelled) {
+            scrollAccumX = 0
+            scrollAccumY = 0
+            return
+        }
+
         scrollAccumX += event.scrollingDeltaX
         scrollAccumY += event.scrollingDeltaY
 
+        let threshold: CGFloat = scrollSessionOption ? 25 : scrollSwipeThreshold
         let ax = abs(scrollAccumX), ay = abs(scrollAccumY)
-        guard max(ax, ay) >= scrollSwipeThreshold else { return }
+        guard max(ax, ay) >= threshold else { return }
 
-        let direction: TrackpadDirection
-        if ax >= ay {
-            // Horizontal: positive deltaX = finger swept right → .right.
-            direction = scrollAccumX > 0 ? .right : .left
-            scrollAccumX = 0
+        let isHorizontal = ax >= ay
+        let positiveX = scrollAccumX > 0
+        let positiveY = scrollAccumY > 0
+        if isHorizontal { scrollAccumX = 0 } else { scrollAccumY = 0 }
+
+        if scrollSessionOption {
+            // Rate-limit so we don't queue overlapping touch sessions on the TV.
+            let now = ProcessInfo.processInfo.systemUptime
+            guard now - lastOptionSwipeTime >= optionSwipeMinInterval else { return }
+            lastOptionSwipeTime = now
+
+            let dir: AppleTVProtocol.SwipeDirection
+            if isHorizontal {
+                dir = positiveX ? .right : .left
+            } else {
+                dir = positiveY ? .down : .up
+            }
+            // Plain swipe (touch flick) — no select-press, so it won't
+            // pause/unpause a playing video.
+            session?.dispatchSwipe(dir)
         } else {
-            // Vertical: positive scrollingDeltaY = content scrolled down → finger swept up → .up.
-            // Empirically reversed in user testing — match what feels right.
-            direction = scrollAccumY > 0 ? .down : .up
-            scrollAccumY = 0
-        }
-
-        // Sustained-swipe escalation: after N consecutive same-direction
-        // fires within the chain window, switch from discrete arrow presses
-        // to the Companion protocol's sendSwipe gesture — tvOS treats that
-        // as a trackpad flick and triggers fast/momentum scrolling, which
-        // is what a "click and swipe" does on a real Siri Remote.
-        let now = ProcessInfo.processInfo.systemUptime
-        let isChained = lastSwipeDirection == direction &&
-                        (now - lastSwipeTime) < swipeChainWindow
-        sustainedSwipeCount = isChained ? sustainedSwipeCount + 1 : 0
-        lastSwipeDirection = direction
-        lastSwipeTime = now
-
-        if sustainedSwipeCount >= sustainedSwipeAfter {
-            // Sustained motion → click-and-swipe (press select + drag).
-            // tvOS apps distinguish this from a plain flick (e.g. Hulu
-            // opens the full Guide on click-swipe down, not on tap-swipe).
-            session?.dispatchClickAndSwipe(direction.asSwipeDirection)
-        } else {
-            session?.dispatch(direction.asRemoteCommand)
+            let cmd: AppleTVProtocol.RemoteCommand
+            if isHorizontal {
+                cmd = positiveX ? .right : .left
+            } else {
+                cmd = positiveY ? .down : .up
+            }
+            session?.dispatch(cmd)
         }
     }
 
@@ -320,6 +308,16 @@ final class MenuBarController: NSObject, NSPopoverDelegate, NSMenuDelegate {
         }
         statusItem.isEnabled = false
         menu.addItem(statusItem)
+
+        // Attention state diagnostic — published by tvOS via FetchAttentionState.
+        // Raw integer; semantics aren't publicly documented but the value is
+        // useful for debugging connection health / active-content state.
+        if let attn = connection?.attentionState {
+            let item = NSMenuItem(title: "    Attention: \(attn)", action: nil, keyEquivalent: "")
+            item.isEnabled = false
+            menu.addItem(item)
+        }
+
         menu.addItem(.separator())
 
         // ── Devices ───────────────────────────────────────────────────────

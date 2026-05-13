@@ -23,26 +23,59 @@ final class RemoteSession: ObservableObject {
 
     private unowned let connection: CompanionConnection
 
+    /// Tracks whether our last power dispatch was a sleep — so the next
+    /// press toggles to wake. Reset to `false` (assume TV is awake) any
+    /// time the connection enters `.connected`, because you can't be
+    /// connected to a sleeping TV.
+    private var hasSentSleep: Bool = false
+    private var stateObserver: AnyCancellable?
+
     init(connection: CompanionConnection) {
         self.connection = connection
+        // Reset the power-toggle assumption when we successfully connect.
+        stateObserver = connection.$state
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] state in
+                if case .connected = state {
+                    self?.hasSentSleep = false
+                }
+            }
     }
 
     func dispatch(_ command: RemoteCommand) {
         connection.send(command)
     }
 
-    /// Siri-style trigger: long-press the home button. The Companion
-    /// protocol has no streaming hold; firing once is enough for tvOS to
-    /// recognise the gesture and start a Siri session.
-    func dispatchSiri() {
+    /// Long-press home → tvOS app switcher (the "press and hold the
+    /// click-wheel home button" gesture on a real Siri Remote). The
+    /// Companion protocol does **not** expose a Siri trigger via HID
+    /// keycodes; the iOS Remote app uses a separate API channel for that.
+    func dispatchAppSwitcher() {
         connection.sendLongPress(.home, ms: 1000)
     }
 
-    /// "Power" button: in the Companion protocol this is `.sleep`. Waking
-    /// happens automatically via `wakeAndConnect` on the next user action
-    /// (or via Wake-on-LAN at reconnect time).
+    /// Long-press menu → screensaver.
+    func dispatchScreensaver() {
+        connection.sendLongPress(.menu, ms: 1000)
+    }
+
+    /// Long-press select → home-screen edit-apps mode.
+    func dispatchEditApps() {
+        connection.sendLongPress(.select, ms: 1000)
+    }
+
+    /// Power-button toggle. Companion protocol's `.wake` and `.sleep` are
+    /// separate explicit keycodes (not a single toggle), so we track our
+    /// last action and alternate. Assumption is reset to "awake" whenever
+    /// the connection becomes `.connected` (sleeping TVs aren't connectable).
     func dispatchPower() {
-        connection.send(.sleep)
+        if hasSentSleep {
+            connection.send(.wake)
+            hasSentSleep = false
+        } else {
+            connection.send(.sleep)
+            hasSentSleep = true
+        }
     }
 
     func dispatchSwipe(_ direction: SwipeDirection) {

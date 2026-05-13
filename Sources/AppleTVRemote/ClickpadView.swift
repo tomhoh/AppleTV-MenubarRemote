@@ -8,8 +8,10 @@ struct ClickpadView: View {
 
     @State private var dragBaseline: CGPoint?
     @State private var totalDragDistance: CGFloat = 0
+    @State private var pressStartTime: TimeInterval?
     private let swipeThreshold: CGFloat = 22   // pt of drag per arrow fire (smaller pad = shorter threshold)
     private let tapMaxTotal: CGFloat = 8       // total motion under this → tap
+    private let longPressDuration: TimeInterval = 0.5   // held > this on centre → edit-apps mode
 
     private let diameter = RemoteTheme.clickpadDiameter
     private let innerDiameter = RemoteTheme.clickpadInnerDiameter
@@ -69,6 +71,7 @@ struct ClickpadView: View {
         if dragBaseline == nil {
             dragBaseline = value.location
             totalDragDistance = 0
+            pressStartTime = ProcessInfo.processInfo.systemUptime
             return
         }
         guard let baseline = dragBaseline else { return }
@@ -101,13 +104,29 @@ struct ClickpadView: View {
     }
 
     private func handleDragEnded(_ value: DragGesture.Value) {
+        let heldFor = pressStartTime.map { ProcessInfo.processInfo.systemUptime - $0 } ?? 0
         defer {
             dragBaseline = nil
             totalDragDistance = 0
+            pressStartTime = nil
         }
-        if totalDragDistance < tapMaxTotal {
+        guard totalDragDistance < tapMaxTotal else { return }
+
+        // Held the centre for > longPressDuration without moving → edit-apps
+        // mode (the Siri Remote's "long-press select to wiggle apps" gesture).
+        if heldFor > longPressDuration, isInsideSelectArea(value.startLocation) {
+            session.dispatchEditApps()
+            flash(.select)
+        } else {
             handleTap(at: value.startLocation)
         }
+    }
+
+    private func isInsideSelectArea(_ location: CGPoint) -> Bool {
+        let center = CGPoint(x: diameter / 2, y: diameter / 2)
+        let dx = location.x - center.x
+        let dy = location.y - center.y
+        return (dx * dx + dy * dy).squareRoot() <= innerDiameter / 2
     }
 
     // MARK: - Tap region detection

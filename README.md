@@ -99,11 +99,26 @@ Grab the latest DMG from the
 - **Tap clickpad** ring → directional press. **Tap centre** → select.
   **Click and drag** across the clickpad → continuous direction (one
   press per ~22pt of drag).
-- **Top-right power button** → sleeps the Apple TV. Any subsequent action
-  wakes it automatically (Wake-on-LAN if needed).
-- **Mic button** (hold) → Siri.
+- **Long-press clickpad centre** (>500ms) → home-screen **edit-apps**
+  mode (the "wiggle apps to rearrange" gesture).
+- **Top-right power button** → **toggles** the Apple TV between sleep
+  and wake. The toggle state resets to "awake" whenever the connection
+  becomes `.connected` (you can't be connected to a sleeping TV).
+- **Back button** — tap → menu (back); **long-press** (>500ms) →
+  screensaver.
+- **App Switcher button** (stack-of-cards icon, second row) → tvOS's
+  app switcher (`sendLongPress(.home)`). *Note: not Siri — the
+  Companion protocol has no Siri trigger keycode.*
 - **Apps button** (square grid icon in the second row) → app-launcher
   slide-out from the left of the remote.
+
+### Now Playing
+
+When the Apple TV is playing something, a compact banner appears at the
+top of the popover with the title, artist / app name, and a thin
+elapsed/duration progress bar. The popover grows taller to accommodate
+it; closes back when the TV idles. Driven by
+`CompanionConnection.$nowPlaying` (updated by the AirPlay tunnel).
 
 ### Trackpad navigation
 
@@ -112,8 +127,8 @@ moving the cursor onto the remote face:
 
 | Gesture | What it does | How it works |
 |---|---|---|
-| **2-finger swipe** ↑↓←→ (short / tap-swipe) | Sends the matching directional press (`up`/`down`/`left`/`right`) | An `NSEvent.scrollWheel` local monitor accumulates trackpad deltas; once 35pt of motion lands in one axis it fires one arrow and resets that axis. Mouse wheels are filtered out (`hasPreciseScrollingDeltas`) because they're too jittery for discrete navigation. |
-| **2-finger swipe** ↑↓←→ (long / continuous) | Sends a **click-and-swipe** — the Siri Remote gesture where you press the centre of the click-wheel and drag. Distinct from a plain flick: in Hulu, a tap-swipe pops the small overlay, while a click-swipe down opens the full Guide. | After **3+ consecutive same-direction fires within 500ms**, the monitor escalates from `RemoteCommand` presses to a compound HID-select-DOWN + touch-event-sequence + HID-select-UP gesture (`CompanionSession.sendClickAndSwipe`). 500ms of no events resets the chain back to discrete presses. |
+| **2-finger swipe** ↑↓←→ | Discrete directional press (`up`/`down`/`left`/`right`) | An `NSEvent.scrollWheel` local monitor accumulates trackpad deltas; once 60pt of motion lands in one axis it fires one arrow and resets that axis. Momentum (post-release) events are ignored. Mouse wheels are filtered out (`hasPreciseScrollingDeltas`). |
+| **⌥ Option + 2-finger swipe** ↑↓←→ | Plain `sendSwipe` (touchpad-flick gesture). Larger amplitude per fire than an arrow — useful for momentum scrolling through long lists. Doesn't pause/unpause playback (no select-press). | Modifier is captured at the swipe session's `.began` phase so a mid-swipe release doesn't flip behaviour. Threshold drops to 25pt so a normal Option-swipe fires multiple flicks. Rate-limited to one per 400ms to prevent overlapping touch sessions on the tvOS side. |
 | **2-finger click** | Sends `select` | macOS dispatches a 2-finger click as `.rightMouseDown` by default. The monitor catches it and fires `select`. Right-clicking the **menu-bar icon** still opens the context menu — those clicks are filtered out by checking `event.window`. |
 
 All three gestures are scoped to popover lifetime: the event monitor is
@@ -126,9 +141,9 @@ sends `up` regardless of your "Natural scrolling" preference. The
 monitor lives in [`MenuBarController.swift`](Sources/AppleTVRemote/MenuBarController.swift)
 under "Trackpad swipe-to-arrow"; tunable knobs there:
 
-- `scrollSwipeThreshold` (35pt) — how far one finger has to swipe to fire one arrow.
-- `sustainedSwipeAfter` (2) — number of same-direction arrows before escalating to click-and-swipe.
-- `swipeChainWindow` (0.5s) — max gap between fires that still counts as "continuous".
+- `scrollSwipeThreshold` (60pt) — arrow-press distance per fire (plain swipe).
+- Option-held threshold (25pt) — flick-gesture distance per fire (Option-swipe).
+- `optionSwipeMinInterval` (0.4s) — rate-limit between Option-held flicks.
 
 ## Launch at startup
 
