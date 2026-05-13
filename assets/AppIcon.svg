@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- macOS-style rounded-square app icon: aluminum gradient backdrop
+       (matching the remote's body), with the menu-bar silhouette
+       scaled up and centred. 228px corner radius ≈ Apple's Big Sur
+       icon proportion (~22%). -->
+  <defs>
+    <linearGradient id="aluminum" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%"   stop-color="#dcdcdc"/>
+      <stop offset="100%" stop-color="#a8a8a8"/>
+    </linearGradient>
+    <linearGradient id="highlight" x1="0%" y1="0%" x2="0%" y2="50%">
+      <stop offset="0%"   stop-color="#ffffff" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Body -->
+  <rect x="0" y="0" width="1024" height="1024" rx="228" ry="228"
+        fill="url(#aluminum)"/>
+  <!-- Subtle top highlight to match remote body styling -->
+  <rect x="0" y="0" width="1024" height="1024" rx="228" ry="228"
+        fill="url(#highlight)"/>
+
+  <!-- Remote silhouette, scale 12 around the original 64x64, padded 128 each side -->
+  <g transform="translate(128 128) scale(12)" stroke="black" fill="none">
+    <rect x="20" y="4" width="24" height="56" rx="8" ry="8" stroke-width="3"/>
+    <circle cx="32" cy="18" r="6" stroke-width="2.5"/>
+    <circle cx="32" cy="18" r="1.6" fill="black" stroke="none"/>
+    <line x1="24" y1="30" x2="40" y2="30" stroke-width="1.5"/>
+    <line x1="26" y1="38" x2="38" y2="38" stroke-width="2" stroke-linecap="round"/>
+    <line x1="26" y1="46" x2="38" y2="46" stroke-width="2" stroke-linecap="round"/>
+    <circle cx="32" cy="54" r="1.6" fill="black" stroke="none"/>
+  </g>
+</svg>

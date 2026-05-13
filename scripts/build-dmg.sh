@@ -56,11 +56,13 @@ BUNDLE_SRC="$REPO_ROOT/.build/release/AppleTVRemote_AppleTVRemote.bundle"
 ATV_SRC="$REPO_ROOT/.build/release/atv"
 INFOPLIST_SRC="$REPO_ROOT/Sources/AppleTVRemote/Resources/Info.plist"
 ENTITLEMENTS="$REPO_ROOT/AppleTVRemote.entitlements"
+APPICON_SRC="$REPO_ROOT/assets/AppIcon.icns"
 
 [[ -x "$BIN_SRC" ]]        || { echo "ERROR: $BIN_SRC missing" >&2; exit 1; }
 [[ -d "$BUNDLE_SRC" ]]     || { echo "ERROR: $BUNDLE_SRC missing" >&2; exit 1; }
 [[ -x "$ATV_SRC" ]]        || { echo "ERROR: $ATV_SRC missing" >&2; exit 1; }
 [[ -f "$INFOPLIST_SRC" ]]  || { echo "ERROR: $INFOPLIST_SRC missing" >&2; exit 1; }
+[[ -f "$APPICON_SRC" ]]    || { echo "ERROR: $APPICON_SRC missing — run scripts/build-app-icon.sh" >&2; exit 1; }
 
 # ── Assemble the .app bundle ──
 echo "==> Assembling .app bundle..."
@@ -69,6 +71,7 @@ mkdir -p "$APP_DST/Contents/MacOS" "$APP_DST/Contents/Resources"
 
 cp    "$BIN_SRC"     "$APP_DST/Contents/MacOS/AppleTVRemote"
 cp -R "$BUNDLE_SRC"  "$APP_DST/Contents/Resources/"
+cp    "$APPICON_SRC" "$APP_DST/Contents/Resources/AppIcon.icns"
 
 # Substitute Info.plist build-setting placeholders.
 sed -e 's/\$(EXECUTABLE_NAME)/AppleTVRemote/g' \
@@ -76,6 +79,13 @@ sed -e 's/\$(EXECUTABLE_NAME)/AppleTVRemote/g' \
     -e 's/\$(PRODUCT_NAME)/AppleTVRemote/g' \
     -e 's/\$(DEVELOPMENT_LANGUAGE)/en/g' \
     "$INFOPLIST_SRC" > "$APP_DST/Contents/Info.plist"
+
+# Point Info.plist at AppIcon.icns (CFBundleIconFile takes precedence over
+# CFBundleIconName which only resolves with a compiled Assets.car).
+/usr/libexec/PlistBuddy -c "Add :CFBundleIconFile string AppIcon" \
+    "$APP_DST/Contents/Info.plist" 2>/dev/null || \
+/usr/libexec/PlistBuddy -c "Set :CFBundleIconFile AppIcon" \
+    "$APP_DST/Contents/Info.plist"
 
 # Mark as a UIElement (no Dock icon — menu-bar-only).
 /usr/libexec/PlistBuddy -c "Add :LSUIElement bool true" \
