@@ -26,9 +26,12 @@ reverse-engineered **Companion** and **MRP** protocols.
   ✓ for the connected one, "paired" / "click to pair" markers; one-click
   switching between paired devices without re-entering a PIN.
 - **Trackpad gestures** — 2-finger swipe on the trackpad while the popover
-  is open sends directional input. Or click and drag across the clickpad.
-- **Power button**, **Siri hold-to-talk**, **volume rocker**, **play/pause**,
-  **home**, **back**.
+  is open sends directional input. 2-finger click selects. Hold **Option**
+  while swiping for momentum scroll. Or click and drag across the on-screen
+  clickpad.
+- **Power-toggle button**, **App Switcher**, **volume rocker**,
+  **play/pause**, **home**, **back** (long-press → screensaver).
+- **Long-press the clickpad centre** → home-screen edit-apps mode.
 - **App launcher** — slide-out panel to the left of the remote; browse the
   apps installed on the Apple TV, search, tap to launch.
 - **Keyboard text input** — when the Apple TV opens a text field, a small
@@ -120,30 +123,76 @@ elapsed/duration progress bar. The popover grows taller to accommodate
 it; closes back when the TV idles. Driven by
 `CompanionConnection.$nowPlaying` (updated by the AirPlay tunnel).
 
-### Trackpad navigation
+### Trackpad gestures
 
-While the popover is open, you can drive the Apple TV without ever
-moving the cursor onto the remote face:
+Open the popover, then drive your Apple TV using your Mac's trackpad —
+no need to keep moving the cursor onto the on-screen remote buttons.
+Three gestures, all only active while the popover is showing:
 
-| Gesture | What it does | How it works |
-|---|---|---|
-| **2-finger swipe** ↑↓←→ | Discrete directional press (`up`/`down`/`left`/`right`) | An `NSEvent.scrollWheel` local monitor accumulates trackpad deltas; once 60pt of motion lands in one axis it fires one arrow and resets that axis. Momentum (post-release) events are ignored. Mouse wheels are filtered out (`hasPreciseScrollingDeltas`). |
-| **⌥ Option + 2-finger swipe** ↑↓←→ | Plain `sendSwipe` (touchpad-flick gesture). Larger amplitude per fire than an arrow — useful for momentum scrolling through long lists. Doesn't pause/unpause playback (no select-press). | Modifier is captured at the swipe session's `.began` phase so a mid-swipe release doesn't flip behaviour. Threshold drops to 25pt so a normal Option-swipe fires multiple flicks. Rate-limited to one per 400ms to prevent overlapping touch sessions on the tvOS side. |
-| **2-finger click** | Sends `select` | macOS dispatches a 2-finger click as `.rightMouseDown` by default. The monitor catches it and fires `select`. Right-clicking the **menu-bar icon** still opens the context menu — those clicks are filtered out by checking `event.window`. |
+#### 🫳 2-finger swipe ↑ ↓ ← →
 
-All three gestures are scoped to popover lifetime: the event monitor is
-installed when the popover opens (`popoverDidShow`) and removed when it
-closes. So they won't interfere with normal trackpad behaviour
-elsewhere on your Mac.
+**What it does:** moves the highlight one step at a time on the Apple
+TV — same as pressing one of the arrow keys on a real remote.
 
-The vertical sign for swipes is empirically calibrated so finger-up
-sends `up` regardless of your "Natural scrolling" preference. The
+**When to use it:** ordinary navigation. Picking a row on the home
+screen, walking through menus, choosing letters on the on-screen
+keyboard.
+
+The gesture is calibrated so a normal-feeling finger flick fires
+exactly one arrow. If you sustain the swipe, more arrows fire as you
+keep moving — but you have to swipe a noticeable distance for each
+one (a gentle nudge won't accidentally skip two).
+
+#### 🫴 Option (⌥) + 2-finger swipe ↑ ↓ ← →
+
+**What it does:** sends a *bigger* swipe — the kind of gesture that
+makes tvOS apps fast-scroll through long lists. Each Option-held swipe
+fires a fast-scroll flick (or several in succession if you keep
+swiping).
+
+**When to use it:** anywhere you'd want to skim quickly past a lot of
+content — scrubbing through a guide, racing past chapters in a TV
+show, jumping through a long shelf of apps.
+
+Why a modifier key? On a real Siri Remote there's no "fast scroll"
+button — it's a feel-it-out gesture on the touchpad. On a Mac
+trackpad we can't reliably tell a tiny flick apart from a sustained
+swipe, so holding **Option** is the explicit "yes I mean a flick, not
+a single arrow" signal. Hold it down, swipe normally, let go when
+you're done.
+
+Tip: Option-held swipes won't pause whatever's playing — they're pure
+navigation motion, so you can scrub a guide without stopping the
+video.
+
+#### 👆 2-finger click
+
+**What it does:** selects the highlighted item — same as pressing the
+centre of the click-wheel on a real remote.
+
+**When to use it:** every time you'd press select. Once you've used
+the 2-finger swipe to land on the row you want, just 2-finger click
+to open it. No need to reach over to the on-screen clickpad.
+
+> macOS already uses 2-finger click for "right-click" elsewhere. While
+> this app's popover is open, that 2-finger click is repurposed to
+> mean "select on the Apple TV". Right-clicking the **menu-bar icon
+> itself** still works the same way — it opens the device menu.
+
+---
+
+All three gestures are scoped to the popover's lifetime — they only
+work while the remote is visible on screen. The moment you click
+outside the popover and it closes, normal trackpad behaviour resumes
+for the rest of your Mac.
+
+Behind the scenes (for the curious): an `NSEvent.scrollWheel` local
 monitor lives in [`MenuBarController.swift`](Sources/AppleTVRemote/MenuBarController.swift)
-under "Trackpad swipe-to-arrow"; tunable knobs there:
+under "Trackpad swipe-to-arrow". Knobs you can tune:
 
-- `scrollSwipeThreshold` (60pt) — arrow-press distance per fire (plain swipe).
-- Option-held threshold (25pt) — flick-gesture distance per fire (Option-swipe).
-- `optionSwipeMinInterval` (0.4s) — rate-limit between Option-held flicks.
+- `scrollSwipeThreshold` (60pt) — distance per arrow on plain swipes.
+- Option-held threshold (25pt) — distance per flick on Option swipes.
+- `optionSwipeMinInterval` (0.4s) — rate-limit between Option flicks.
 
 ## Launch at startup
 
