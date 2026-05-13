@@ -99,13 +99,32 @@ Grab the latest DMG from the
 - **Tap clickpad** ring → directional press. **Tap centre** → select.
   **Click and drag** across the clickpad → continuous direction (one
   press per ~22pt of drag).
-- **2-finger trackpad swipe** anywhere on the trackpad while the popover
-  is open → directional input. Mouse wheel is intentionally ignored.
 - **Top-right power button** → sleeps the Apple TV. Any subsequent action
   wakes it automatically (Wake-on-LAN if needed).
 - **Mic button** (hold) → Siri.
 - **Apps button** (square grid icon in the second row) → app-launcher
   slide-out from the left of the remote.
+
+### Trackpad navigation
+
+While the popover is open, you can drive the Apple TV without ever
+moving the cursor onto the remote face:
+
+| Gesture | What it does | How it works |
+|---|---|---|
+| **2-finger swipe** ↑↓←→ | Sends the matching directional press (`up`/`down`/`left`/`right`) | An `NSEvent.scrollWheel` local monitor accumulates trackpad deltas; once 35pt of motion lands in one axis it fires one arrow and resets that axis. Mouse wheels are filtered out (`hasPreciseScrollingDeltas`) because they're too jittery for discrete navigation. |
+| **2-finger click** | Sends `select` | macOS dispatches a 2-finger click as `.rightMouseDown` by default. The monitor catches it and fires `select`. Right-clicking the **menu-bar icon** still opens the context menu — those clicks are filtered out by checking `event.window`. |
+
+Both gestures are scoped to popover lifetime: the event monitor is
+installed when the popover opens (`popoverDidShow`) and removed when it
+closes. So they won't interfere with normal trackpad behaviour
+elsewhere on your Mac.
+
+The vertical sign for swipes is empirically calibrated so finger-up
+sends `up` regardless of your "Natural scrolling" preference. The
+monitor lives in [`MenuBarController.swift`](Sources/AppleTVRemote/MenuBarController.swift)
+under "Trackpad swipe-to-arrow" — easy to tune the 35pt threshold or
+swap the sign if you want it inverted.
 
 ## Launch at startup
 
