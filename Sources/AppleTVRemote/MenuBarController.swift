@@ -126,19 +126,40 @@ final class MenuBarController: NSObject, NSPopoverDelegate, NSMenuDelegate {
 
     // MARK: - Trackpad swipe-to-arrow
 
-    /// Listens for 2-finger trackpad scroll events while the popover is open
-    /// and translates accumulated motion into directional commands.
+    /// Listens for trackpad scroll + 2-finger-click (right-mouse-down) events
+    /// while the popover is open. Scroll deltas translate to directional
+    /// commands; 2-finger clicks fire `.select`. Clicks on the status item
+    /// button itself are ignored so right-clicking the icon still opens the
+    /// context menu.
     private func installScrollMonitor() {
         guard scrollMonitor == nil else { return }
         scrollAccumX = 0
         scrollAccumY = 0
-        scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+        scrollMonitor = NSEvent.addLocalMonitorForEvents(
+            matching: [.scrollWheel, .rightMouseDown]
+        ) { [weak self] event in
             guard let self else { return event }
-            // Only react to trackpad-style precise deltas. Mouse wheels emit
-            // imprecise deltas that would feel jittery here.
-            guard event.hasPreciseScrollingDeltas else { return event }
-            Task { @MainActor in self.handleTrackpadScroll(event) }
-            return nil  // consume — don't let it bubble
+            switch event.type {
+            case .scrollWheel:
+                // Only react to trackpad-style precise deltas. Mouse wheels
+                // emit imprecise deltas that would feel jittery here.
+                guard event.hasPreciseScrollingDeltas else { return event }
+                Task { @MainActor in self.handleTrackpadScroll(event) }
+                return nil  // consume
+
+            case .rightMouseDown:
+                // Don't hijack right-clicks on our own status item — those
+                // are how the user opens the context menu.
+                if let btnWin = self.statusItem?.button?.window,
+                   event.window === btnWin {
+                    return event
+                }
+                Task { @MainActor in self.session?.dispatch(.select) }
+                return nil  // consume
+
+            default:
+                return event
+            }
         }
     }
 
