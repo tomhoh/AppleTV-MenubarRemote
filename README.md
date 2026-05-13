@@ -107,6 +107,32 @@ Grab the latest DMG from the
 - **Apps button** (square grid icon in the second row) → app-launcher
   slide-out from the left of the remote.
 
+## Launch at startup
+
+Right-click the menu-bar icon → toggle **Launch at Startup**. Uses Apple's
+modern `SMAppService.mainApp` Service Management API to register the app
+as a Login Item with macOS — no `launchd` plist editing, no Login Items
+GUI required.
+
+A few caveats for the ad-hoc-signed build:
+
+- **Install to `/Applications/` first.** `SMAppService.mainApp` ties
+  registration to a stable bundle path. Run from `~/Downloads` or
+  elsewhere and macOS may register it but skip the actual relaunch at
+  login.
+- **First time you toggle it on**, macOS may surface a confirmation
+  in System Settings → General → Login Items. Approve there.
+- **If you rebuild + replace the `.app`**, toggle Launch-at-Startup off
+  and back on — the ad-hoc signature changes, which can invalidate the
+  stored registration.
+
+To verify the registration:
+
+```sh
+open "x-apple.systempreferences:com.apple.LoginItems-Settings.extension"
+# AppleTVRemote should appear under "Open at Login".
+```
+
 ## Requirements
 
 - macOS 13+
