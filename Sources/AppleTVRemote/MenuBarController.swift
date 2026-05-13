@@ -151,6 +151,18 @@ final class MenuBarController: NSObject, NSPopoverDelegate, NSMenuDelegate {
             matching: [.scrollWheel, .rightMouseDown]
         ) { [weak self] event in
             guard let self else { return event }
+
+            // When the app-launcher slide-out is visible the popover is
+            // ~3× wider; in that mode the trackpad-to-Apple-TV behaviour
+            // would fight SwiftUI's ScrollView (apps grid) and the
+            // launcher's tap targets. Pass events through so the launcher
+            // scrolls and clicks normally; trackpad-to-TV resumes when
+            // the launcher is closed and the popover snaps back.
+            if let pop = self.popover,
+               pop.contentSize.width > RemoteTheme.popoverWidth + 20 {
+                return event
+            }
+
             switch event.type {
             case .scrollWheel:
                 // Only react to trackpad-style precise deltas. Mouse wheels
