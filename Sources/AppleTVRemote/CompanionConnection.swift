@@ -338,6 +338,13 @@ final class CompanionConnection: ObservableObject {
         session?.sendSwipe(direction)
     }
 
+    /// "Click-and-swipe" — press the centre button while dragging.
+    /// Distinct from `sendSwipe`; tvOS apps treat the two as different inputs.
+    func sendClickAndSwipe(_ direction: SwipeDirection) {
+        guard state == .connected else { return }
+        session?.sendClickAndSwipe(direction)
+    }
+
     func sendText(_ text: String, completion: @escaping (Error?) -> Void) {
         guard state == .connected else { completion(TextInputError.notConnected); return }
         guard keyboardActive else { completion(TextInputError.noActiveTextField); return }

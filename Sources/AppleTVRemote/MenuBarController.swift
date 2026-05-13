@@ -26,6 +26,18 @@ final class MenuBarController: NSObject, NSPopoverDelegate, NSMenuDelegate {
     private var scrollAccumY: CGFloat = 0
     private let scrollSwipeThreshold: CGFloat = 35
 
+    // Sustained-swipe escalation: after the user fires this many consecutive
+    // arrow steps in the same direction within `swipeChainWindow` seconds,
+    // we switch from discrete `RemoteCommand` presses to the Companion
+    // protocol's `sendSwipe` gesture (the "trackpad flick" tvOS interprets
+    // as a fast/momentum scroll — what the Siri Remote does when you click
+    // and swipe).
+    private var lastSwipeDirection: TrackpadDirection?
+    private var lastSwipeTime: TimeInterval = 0
+    private var sustainedSwipeCount: Int = 0
+    private let sustainedSwipeAfter: Int = 2          // 3rd same-direction fire switches to gesture
+    private let swipeChainWindow: TimeInterval = 0.5  // must be within this gap to count as sustained
+
     private weak var connection:  CompanionConnection?
     private weak var discovery:   DeviceDiscovery?
     private weak var autoConnect: AutoConnectStore?
@@ -170,6 +182,31 @@ final class MenuBarController: NSObject, NSPopoverDelegate, NSMenuDelegate {
         }
         scrollAccumX = 0
         scrollAccumY = 0
+        lastSwipeDirection = nil
+        lastSwipeTime = 0
+        sustainedSwipeCount = 0
+    }
+
+    private enum TrackpadDirection {
+        case up, down, left, right
+
+        var asRemoteCommand: AppleTVProtocol.RemoteCommand {
+            switch self {
+            case .up: return .up
+            case .down: return .down
+            case .left: return .left
+            case .right: return .right
+            }
+        }
+
+        var asSwipeDirection: AppleTVProtocol.SwipeDirection {
+            switch self {
+            case .up: return .up
+            case .down: return .down
+            case .left: return .left
+            case .right: return .right
+            }
+        }
     }
 
     private func handleTrackpadScroll(_ event: NSEvent) {
@@ -179,18 +216,38 @@ final class MenuBarController: NSObject, NSPopoverDelegate, NSMenuDelegate {
         let ax = abs(scrollAccumX), ay = abs(scrollAccumY)
         guard max(ax, ay) >= scrollSwipeThreshold else { return }
 
-        let command: AppleTVProtocol.RemoteCommand
+        let direction: TrackpadDirection
         if ax >= ay {
             // Horizontal: positive deltaX = finger swept right → .right.
-            command = scrollAccumX > 0 ? .right : .left
+            direction = scrollAccumX > 0 ? .right : .left
             scrollAccumX = 0
         } else {
             // Vertical: positive scrollingDeltaY = content scrolled down → finger swept up → .up.
             // Empirically reversed in user testing — match what feels right.
-            command = scrollAccumY > 0 ? .down : .up
+            direction = scrollAccumY > 0 ? .down : .up
             scrollAccumY = 0
         }
-        session?.dispatch(command)
+
+        // Sustained-swipe escalation: after N consecutive same-direction
+        // fires within the chain window, switch from discrete arrow presses
+        // to the Companion protocol's sendSwipe gesture — tvOS treats that
+        // as a trackpad flick and triggers fast/momentum scrolling, which
+        // is what a "click and swipe" does on a real Siri Remote.
+        let now = ProcessInfo.processInfo.systemUptime
+        let isChained = lastSwipeDirection == direction &&
+                        (now - lastSwipeTime) < swipeChainWindow
+        sustainedSwipeCount = isChained ? sustainedSwipeCount + 1 : 0
+        lastSwipeDirection = direction
+        lastSwipeTime = now
+
+        if sustainedSwipeCount >= sustainedSwipeAfter {
+            // Sustained motion → click-and-swipe (press select + drag).
+            // tvOS apps distinguish this from a plain flick (e.g. Hulu
+            // opens the full Guide on click-swipe down, not on tap-swipe).
+            session?.dispatchClickAndSwipe(direction.asSwipeDirection)
+        } else {
+            session?.dispatch(direction.asRemoteCommand)
+        }
     }
 
     @objc private func toggle(_ sender: AnyObject?) {

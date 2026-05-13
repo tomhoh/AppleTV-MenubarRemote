@@ -218,6 +218,48 @@ public final class CompanionSession {
         }
     }
 
+    /// "Click-and-swipe" gesture — the Siri Remote action where you press
+    /// the centre of the click-wheel and drag. tvOS apps treat this as a
+    /// distinct input from a plain swipe (e.g. in Hulu, a tap-swipe opens
+    /// the small overlay menu, while a click-swipe down opens the full
+    /// Guide). Encoded as: HID select DOWN → touch begin/move/end → HID
+    /// select UP — the select keycode is held for the duration of the
+    /// touch sequence.
+    public func sendClickAndSwipe(_ direction: SwipeDirection) {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let selectKey = RemoteCommand.select.hidKeycode
+            let (start, end) = direction.coordinates
+            let baseNs = DispatchTime.now().uptimeNanoseconds
+
+            // Press select DOWN (no UP yet).
+            self.sendEncrypted(OPACK.encodeHIDCommand(keycode: selectKey,
+                                                      state: 1,
+                                                      txn: self.nextTxn()))
+
+            // Touch begin → moves → end (same as sendSwipe).
+            self.sendEncrypted(OPACK.encodeTouchEvent(x: start.x, y: start.y, phase: 1,
+                                                      txn: self.nextTxn(),
+                                                      nanoseconds: DispatchTime.now().uptimeNanoseconds - baseNs))
+            for pt in direction.interpolatedSteps() {
+                self.sendEncrypted(OPACK.encodeTouchEvent(x: pt.x, y: pt.y, phase: 3,
+                                                          txn: self.nextTxn(),
+                                                          nanoseconds: DispatchTime.now().uptimeNanoseconds - baseNs))
+                try? await Task.sleep(for: .milliseconds(18))
+            }
+            self.sendEncrypted(OPACK.encodeTouchEvent(x: end.x, y: end.y, phase: 4,
+                                                      txn: self.nextTxn(),
+                                                      nanoseconds: DispatchTime.now().uptimeNanoseconds - baseNs))
+            try? await Task.sleep(for: .milliseconds(50))
+            self.sendEncrypted(OPACK.encodeTouchStop(txn: self.nextTxn()))
+
+            // Release select UP.
+            self.sendEncrypted(OPACK.encodeHIDCommand(keycode: selectKey,
+                                                      state: 2,
+                                                      txn: self.nextTxn()))
+        }
+    }
+
     // MARK: - Text Input
 
     public func sendText(_ text: String, completion: @escaping (Error?) -> Void) {

@@ -48,4 +48,12 @@ final class RemoteSession: ObservableObject {
     func dispatchSwipe(_ direction: SwipeDirection) {
         connection.sendSwipe(direction)
     }
+
+    /// Press-and-drag gesture — what a Siri Remote does when you click the
+    /// centre of the click-wheel and swipe. tvOS apps distinguish this from
+    /// a plain `sendSwipe` (e.g. Hulu opens the full Guide on a click-swipe
+    /// down, but only a small overlay on a tap-swipe).
+    func dispatchClickAndSwipe(_ direction: SwipeDirection) {
+        connection.sendClickAndSwipe(direction)
+    }
 }

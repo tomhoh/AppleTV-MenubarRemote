@@ -112,10 +112,11 @@ moving the cursor onto the remote face:
 
 | Gesture | What it does | How it works |
 |---|---|---|
-| **2-finger swipe** ↑↓←→ | Sends the matching directional press (`up`/`down`/`left`/`right`) | An `NSEvent.scrollWheel` local monitor accumulates trackpad deltas; once 35pt of motion lands in one axis it fires one arrow and resets that axis. Mouse wheels are filtered out (`hasPreciseScrollingDeltas`) because they're too jittery for discrete navigation. |
+| **2-finger swipe** ↑↓←→ (short / tap-swipe) | Sends the matching directional press (`up`/`down`/`left`/`right`) | An `NSEvent.scrollWheel` local monitor accumulates trackpad deltas; once 35pt of motion lands in one axis it fires one arrow and resets that axis. Mouse wheels are filtered out (`hasPreciseScrollingDeltas`) because they're too jittery for discrete navigation. |
+| **2-finger swipe** ↑↓←→ (long / continuous) | Sends a **click-and-swipe** — the Siri Remote gesture where you press the centre of the click-wheel and drag. Distinct from a plain flick: in Hulu, a tap-swipe pops the small overlay, while a click-swipe down opens the full Guide. | After **3+ consecutive same-direction fires within 500ms**, the monitor escalates from `RemoteCommand` presses to a compound HID-select-DOWN + touch-event-sequence + HID-select-UP gesture (`CompanionSession.sendClickAndSwipe`). 500ms of no events resets the chain back to discrete presses. |
 | **2-finger click** | Sends `select` | macOS dispatches a 2-finger click as `.rightMouseDown` by default. The monitor catches it and fires `select`. Right-clicking the **menu-bar icon** still opens the context menu — those clicks are filtered out by checking `event.window`. |
 
-Both gestures are scoped to popover lifetime: the event monitor is
+All three gestures are scoped to popover lifetime: the event monitor is
 installed when the popover opens (`popoverDidShow`) and removed when it
 closes. So they won't interfere with normal trackpad behaviour
 elsewhere on your Mac.
@@ -123,8 +124,11 @@ elsewhere on your Mac.
 The vertical sign for swipes is empirically calibrated so finger-up
 sends `up` regardless of your "Natural scrolling" preference. The
 monitor lives in [`MenuBarController.swift`](Sources/AppleTVRemote/MenuBarController.swift)
-under "Trackpad swipe-to-arrow" — easy to tune the 35pt threshold or
-swap the sign if you want it inverted.
+under "Trackpad swipe-to-arrow"; tunable knobs there:
+
+- `scrollSwipeThreshold` (35pt) — how far one finger has to swipe to fire one arrow.
+- `sustainedSwipeAfter` (2) — number of same-direction arrows before escalating to click-and-swipe.
+- `swipeChainWindow` (0.5s) — max gap between fires that still counts as "continuous".
 
 ## Launch at startup
 
