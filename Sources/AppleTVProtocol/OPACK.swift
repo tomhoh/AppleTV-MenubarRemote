@@ -292,6 +292,22 @@ public enum OPACK {
         ] as [String: Any])
     }
 
+    /// Open a "TV Remote Client" sub-session inside the existing Companion
+    /// channel. Without this, newer tvOS (Apple TV 4K gen 3 on tvOS 26.x;
+    /// regressed in 18.4+) refuses to bind handlers for
+    /// FetchLaunchableApplicationsEvent and _fetchAttentionState until a
+    /// TVRC session is registered with tvremoted — silent-drop, no error.
+    /// Older firmware errors on this command; sender should swallow the
+    /// error per pyatv PR #2855: "safe to always send it".
+    public static func encodeTVRCSessionStart(txn: UInt32) -> Data {
+        pack([
+            "_i": "TVRCSessionStart",
+            "_t": 2,
+            "_x": txn,
+            "_c": ["ProtocolVersionKey": "1.2"] as [String: Any],
+        ] as [String: Any])
+    }
+
     /// Fetch list of launchable apps from the ATV.
     public static func encodeFetchLaunchableApplicationsEvent(txn: UInt32) -> Data {
         pack([

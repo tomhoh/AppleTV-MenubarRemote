@@ -107,7 +107,15 @@ public final class CompanionSession {
     // MARK: - Session startup
 
     /// Send the five session-init messages (_systemInfo, _touchStart, _sessionStart,
-    /// _tiStart) that the ATV requires before it considers the session open.
+    /// TVRCSessionStart, _tiStart) that the ATV requires before it considers the
+    /// session open.
+    ///
+    /// TVRCSessionStart is defensive: today the app works without it because
+    /// macOS-system traffic (Shortcuts daemon, AirPlay discovery, the bundled
+    /// Remote in Control Center) implicitly binds tvremoted's handlers for
+    /// FetchLaunchableApplicationsEvent / _fetchAttentionState before we connect.
+    /// If a future tvOS tightens that implicit bind, those requests silent-drop
+    /// without TVRCSessionStart. See pyatv PR #2855.
     public func sendSessionInit(clientID: String, name: String) {
         let txn1 = nextTxn()
         sendEncrypted(OPACK.encodeSystemInfo(clientID: clientID, name: name, txn: txn1))
@@ -119,6 +127,14 @@ public final class CompanionSession {
         let localSID = UInt32.random(in: 0..<UInt32.max)
         sessionStartTxn = txn3
         sendEncrypted(OPACK.encodeSessionStart(txn: txn3, localSID: localSID))
+
+        let tvrcTxn = nextTxn()
+        pendingCallbacks[tvrcTxn] = { _ in
+            // Response is either a success ack or "No request handler" error
+            // on older firmware. Either way we don't need the contents.
+            // Older firmware returns an error, ignore per pyatv PR #2855.
+        }
+        sendEncrypted(OPACK.encodeTVRCSessionStart(txn: tvrcTxn))
 
         let txn4 = nextTxn()
         pendingCallbacks[txn4] = { [weak self] response in
