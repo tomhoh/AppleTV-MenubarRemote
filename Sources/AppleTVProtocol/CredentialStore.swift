@@ -153,7 +153,7 @@ public struct PairingCredentials: Codable {
     public let name: String
 
     public init(clientID: String, ltsk: Data, ltpk: Data, deviceLTPK: Data, deviceID: String,
-                name: String = "Mac Remote") {
+                name: String = "Mac-AppleTV Remote") {
         self.clientID = clientID
         self.ltsk = ltsk
         self.ltpk = ltpk
@@ -169,7 +169,7 @@ public struct PairingCredentials: Codable {
         ltpk       = try c.decode(Data.self,   forKey: .ltpk)
         deviceLTPK = try c.decode(Data.self,   forKey: .deviceLTPK)
         deviceID   = try c.decode(String.self, forKey: .deviceID)
-        name       = (try? c.decode(String.self, forKey: .name)) ?? "Mac Remote"
+        name       = (try? c.decode(String.self, forKey: .name)) ?? "Mac-AppleTV Remote"
         // Older credentials persisted an `rpID` field that was never written
         // to the wire (the encoder uses clientID for both `_i` and `_pubID`).
         // We silently ignore it — leaving the JSON intact for forward-compat.
