@@ -33,6 +33,13 @@ public final class HAPPairing: @unchecked Sendable {
     private let ltKeyPair = Curve25519.Signing.PrivateKey()
     public private(set) var credentials: PairingCredentials?
 
+    /// Display name registered in the Apple TV's controller store during M5.
+    /// Shown in **Settings → Remotes & Devices → Remote App and Devices**, and
+    /// echoed back in `_systemInfo._c.name` on every reconnect. Callers must
+    /// set this before M4 arrives; the fallback is only hit if the UI never
+    /// populated it.
+    public var controllerName: String = "Mac"
+
     // A stable identifier for this Mac client — persisted in UserDefaults so
     // re-pairings present the same ID to the Apple TV.
     private static let clientIDKey = "com.adhir.appletv-remote.clientID"
@@ -125,7 +132,8 @@ public final class HAPPairing: @unchecked Sendable {
             ltsk:         ltKeyPair.rawRepresentation,
             ltpk:         Data(ltKeyPair.publicKey.rawRepresentation),
             deviceLTPK:   atv_ltpk,
-            deviceID:     String(data: atv_id, encoding: .utf8) ?? atv_id.hexString
+            deviceID:     String(data: atv_id, encoding: .utf8) ?? atv_id.hexString,
+            name:         controllerName
         )
         credentials = creds
         step = .done
@@ -163,7 +171,7 @@ public final class HAPPairing: @unchecked Sendable {
         // Companion-specific: tag=0x11 with OPACK {"name": ...}.
         // Without this the ATV stores us in the HAP-only controller store, which the
         // Companion pair-verify service does not check → error=2 (Authentication) in M4.
-        inner.append(.name, OPACK.encodeDeviceName("Mac Remote"))
+        inner.append(.name, OPACK.encodeDeviceName(controllerName))
 
         // Encrypt with ChaCha20-Poly1305, nonce = "PS-Msg05" zero-padded to 12 bytes
         let nonceData = Data.noncePadded("PS-Msg05")

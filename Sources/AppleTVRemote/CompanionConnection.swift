@@ -55,6 +55,16 @@ final class CompanionConnection: ObservableObject {
     /// Apps available for launch on the ATV, fetched after each session start.
     @Published var appList: [(id: String, name: String)] = []
 
+    /// Display name this Mac will register with the ATV during pair-setup.
+    /// Prefilled with the user's Computer Name (System Settings → General →
+    /// About → Name); editable in the pairing dialog before the user hits
+    /// Submit. This is what shows up in Apple TV **Settings → Remotes &
+    /// Devices → Remote App and Devices** and in device pickers.
+    @Published var pairingClientName: String = {
+        let raw = Host.current().localizedName ?? "Mac"
+        return String(raw.prefix(30))
+    }()
+
     /// Live AirPlay MRP tunnel — provides real-time now-playing pushes.
     private var airPlayTunnel: AirPlayTunnel.Tunnel?
     private var lastPlaybackStateTimestamp: Double = 0
@@ -442,8 +452,10 @@ final class CompanionConnection: ObservableObject {
 
     func submitPairingPin(_ pin: String) {
         guard state == .awaitingPairingPin else { return }
+        let name = pairingClientName.trimmingCharacters(in: .whitespacesAndNewlines)
         state = .connecting
         pairingFlow.submitPin(pin,
+            controllerName: name.isEmpty ? "Mac" : name,
             onSend: { [weak self] m3 in
                 self?.session?.sendFrame(.psNext, payload: OPACK.wrapPsNextData(m3))
             },

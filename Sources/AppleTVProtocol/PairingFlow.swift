@@ -73,6 +73,11 @@ public final class PairingFlow {
     // MARK: - Entry points (called by CompanionConnection)
 
     /// Begin pair-setup: generate M1 and send PS_Start.
+    ///
+    /// The controller name the ATV registers is supplied later, in
+    /// `submitPin(_:controllerName:...)` — that's when the user commits
+    /// their choice from the pairing dialog. Until then the HAPPairing
+    /// carries its default fallback name.
     public func startPairSetup() {
         let p = HAPPairing()
         pairing = p
@@ -168,8 +173,17 @@ public final class PairingFlow {
 
     /// Called from `CompanionConnection.submitPairingPin(_:)` after the user
     /// enters their PIN. Runs SRP off-main to avoid beachballing.
-    public func submitPin(_ pin: String, onSend: @escaping @Sendable @MainActor (Data) -> Void, onError: @escaping @Sendable @MainActor (String) -> Void) {
+    ///
+    /// `controllerName` is the user's final choice from the pairing dialog;
+    /// applied to the in-flight HAPPairing so M5 (built after M4 arrives)
+    /// uses it. Passing this here — instead of at `startPairSetup` — lets
+    /// the UI show the name field on the PIN screen alongside the PIN,
+    /// which is the natural place for both inputs.
+    public func submitPin(_ pin: String, controllerName: String,
+                          onSend: @escaping @Sendable @MainActor (Data) -> Void,
+                          onError: @escaping @Sendable @MainActor (String) -> Void) {
         guard let m2 = pendingM2Data else { return }
+        pairing?.controllerName = controllerName
         let capturedPairing = pairing
         pinTask?.cancel()
         pinTask = Task.detached { [weak self] in
