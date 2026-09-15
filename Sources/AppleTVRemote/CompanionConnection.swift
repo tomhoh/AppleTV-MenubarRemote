@@ -71,6 +71,13 @@ final class CompanionConnection: ObservableObject {
 
     // MARK: - Connect / Disconnect
 
+    /// True if we have stored pair-setup credentials for this device id.
+    /// Used by the menu-bar right-click list to decide whether tapping a
+    /// row will pair-verify silently or kick off pair-setup.
+    func isPaired(deviceID: String) -> Bool {
+        credentialStore.hasCredentials(for: deviceID)
+    }
+
     /// Smart connect: probes the device first (0.3 s TCP timeout).
     func wakeAndConnect(to device: AppleTVDevice) {
         switch state {

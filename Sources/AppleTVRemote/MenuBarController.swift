@@ -334,11 +334,14 @@ final class MenuBarController: NSObject, NSPopoverDelegate, NSMenuDelegate {
             let currentId = connection?.currentDevice?.id
             for device in devices {
                 let isCurrent = device.id == currentId && connection?.state == .connected
-                let isPaired = device.isPaired
+                // The device model's `isPaired` isn't populated by discovery —
+                // ask the credential store directly so paired devices don't
+                // masquerade as "click to pair" in the menu.
+                let isPaired = connection?.isPaired(deviceID: device.id) ?? false
 
                 let suffix: String
                 if isCurrent      { suffix = "  •  connected" }
-                else if isPaired  { suffix = "  •  paired" }
+                else if isPaired  { suffix = "  •  click to connect" }
                 else              { suffix = "  •  click to pair" }
 
                 let item = NSMenuItem(
@@ -407,8 +410,26 @@ final class MenuBarController: NSObject, NSPopoverDelegate, NSMenuDelegate {
     // MARK: - Menu actions
 
     @objc private func deviceSelected(_ sender: NSMenuItem) {
-        guard let device = sender.representedObject as? AppleTVDevice else { return }
-        connection?.wakeAndConnect(to: device)
+        guard let device = sender.representedObject as? AppleTVDevice,
+              let connection else { return }
+        // `wakeAndConnect` no-ops if we're already connected/connecting to
+        // some other device (see its early return on non-disconnected
+        // state). Tear the current session down first when needed, then
+        // connect on the next runloop tick — the 0.3 s asyncAfter matches
+        // the reconnect gap used by PairingFlow for a clean socket close.
+        let needsTeardown: Bool
+        switch connection.state {
+        case .disconnected, .error: needsTeardown = false
+        default:                    needsTeardown = true
+        }
+        if needsTeardown {
+            connection.disconnect()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak connection] in
+                connection?.wakeAndConnect(to: device)
+            }
+        } else {
+            connection.wakeAndConnect(to: device)
+        }
         // Open the popover so the user sees the pairing UI if a PIN is needed.
         openMainWindow()
     }
