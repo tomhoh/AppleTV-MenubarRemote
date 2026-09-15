@@ -49,7 +49,7 @@ public enum MRPMessage {
     public static func deviceInfo(uniqueIdentifier: String) -> Data {
         var inner = Data()
         inner.appendStringField(fieldNumber: 1, value: uniqueIdentifier)
-        inner.appendStringField(fieldNumber: 2, value: "Mac Remote")
+        inner.appendStringField(fieldNumber: 2, value: "Mac-AppleTV Remote")
         inner.appendStringField(fieldNumber: 3, value: "iPhone")                // localizedModelName
         inner.appendStringField(fieldNumber: 4, value: "18G82")                 // systemBuildVersion
         inner.appendStringField(fieldNumber: 5, value: "com.apple.TVRemote")    // applicationBundleIdentifier

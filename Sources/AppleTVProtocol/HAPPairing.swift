@@ -163,7 +163,7 @@ public final class HAPPairing: @unchecked Sendable {
         // Companion-specific: tag=0x11 with OPACK {"name": ...}.
         // Without this the ATV stores us in the HAP-only controller store, which the
         // Companion pair-verify service does not check → error=2 (Authentication) in M4.
-        inner.append(.name, OPACK.encodeDeviceName("Mac Remote"))
+        inner.append(.name, OPACK.encodeDeviceName("Mac-AppleTV Remote"))
 
         // Encrypt with ChaCha20-Poly1305, nonce = "PS-Msg05" zero-padded to 12 bytes
         let nonceData = Data.noncePadded("PS-Msg05")
