@@ -106,6 +106,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         onFinishLaunching?()
+        // On macOS 26+, SwiftUI's placeholder `Settings { EmptyView() }`
+        // scene sometimes auto-shows an empty settings window at launch.
+        // We're a menu-bar-only app; close any such windows on the next
+        // runloop tick so we don't ship a stray empty pane.
+        DispatchQueue.main.async {
+            for window in NSApp.windows where window.isVisible {
+                if window.identifier?.rawValue.contains("Settings") == true
+                   || window.title.localizedCaseInsensitiveContains("settings") {
+                    window.close()
+                }
+            }
+        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {

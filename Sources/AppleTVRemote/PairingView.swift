@@ -47,7 +47,13 @@ struct PairingView: View {
     private var content: some View {
         switch connection.state {
         case .awaitingPairingPin:
-            PinEntryView { connection.submitPairingPin($0) }
+            PinEntryView(
+                clientName: Binding(
+                    get: { connection.pairingClientName },
+                    set: { connection.pairingClientName = $0 }
+                ),
+                onSubmit: { connection.submitPairingPin($0) }
+            )
         case .connecting, .waking:
             centeredSpinner(connection.state == .waking ? "Waking…" : "Connecting…")
         case .error(let message):
@@ -140,10 +146,13 @@ struct PairingView: View {
 // MARK: - PIN entry
 
 private struct PinEntryView: View {
+    @Binding var clientName: String
     let onSubmit: (String) -> Void
 
     @State private var pin: String = ""
-    @FocusState private var focused: Bool
+    @FocusState private var focused: Field?
+
+    private enum Field { case pin, name }
 
     var body: some View {
         VStack(spacing: 10) {
@@ -155,13 +164,30 @@ private struct PinEntryView: View {
                 .multilineTextAlignment(.center)
                 .textFieldStyle(.roundedBorder)
                 .frame(width: 100)
-                .focused($focused)
-                .onAppear { focused = true }
+                .focused($focused, equals: .pin)
+                .onAppear { focused = .pin }
                 .onSubmit(submit)
                 .onChange(of: pin) { new in
                     pin = String(new.filter(\.isNumber).prefix(4))
-                    if pin.count == 4 { submit() }
                 }
+
+            VStack(spacing: 2) {
+                Text("Show this Mac on the Apple TV as")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                TextField("Mac", text: $clientName)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 180)
+                    .focused($focused, equals: .name)
+                    .onSubmit(submit)
+                    .onChange(of: clientName) { new in
+                        // Cap at 30 chars — the ATV Settings row truncates
+                        // longer strings and it's the same limit we use
+                        // when prefilling from Host.current().localizedName.
+                        if new.count > 30 { clientName = String(new.prefix(30)) }
+                    }
+            }
+
             Button("Submit", action: submit)
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
