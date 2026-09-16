@@ -56,6 +56,10 @@ final class TextInputWindowManager: NSObject {
         openWindow()
     }
 
+    /// True while the floating input window exists and thus needs the
+    /// menu-bar popover held open despite key-focus moving away from it.
+    private var popoverLocked = false
+
     func openWindow() {
         guard let connection else { return }
         if let existing = window {
@@ -129,12 +133,24 @@ final class TextInputWindowManager: NSObject {
 
         KeyboardNotificationManager.shared.cancelAttention()
         window = w
+        // Keep the menu-bar popover from auto-dismissing when the user
+        // clicks into the floating input — its default `.transient`
+        // behavior would close it the moment this window becomes key.
+        // Balanced in closeWindow / windowWillClose.
+        if !popoverLocked {
+            popoverLocked = true
+            MenuBarController.shared.lockPopover()
+        }
     }
 
     func closeWindow() {
         window?.close()
         window = nil
         KeyboardNotificationManager.shared.resetNotify()
+        if popoverLocked {
+            popoverLocked = false
+            MenuBarController.shared.unlockPopover()
+        }
     }
 }
 
@@ -142,6 +158,10 @@ extension TextInputWindowManager: NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
         window = nil
         KeyboardNotificationManager.shared.resetNotify()
+        if popoverLocked {
+            popoverLocked = false
+            MenuBarController.shared.unlockPopover()
+        }
     }
 
     func windowDidBecomeKey(_ notification: Notification) {

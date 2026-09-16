@@ -16,6 +16,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate, NSMenuDelegate {
 
     private var statusItem:       NSStatusItem?
     private var popover:          NSPopover?
+    private var popoverLockCount: Int = 0
     private var session:          RemoteSession?
     private var stateCancellable: AnyCancellable?
     private var sizeObserver:     NSObjectProtocol?
@@ -269,6 +270,25 @@ final class MenuBarController: NSObject, NSPopoverDelegate, NSMenuDelegate {
                 popWin?.makeKey()
                 popWin?.makeFirstResponder(nil)
             }
+        }
+    }
+
+    /// Freeze the popover open while another app-owned window (currently
+    /// only the floating text-input strip) needs focus. The popover's
+    /// normal `.transient` behavior would otherwise dismiss it the
+    /// instant that window becomes key. Balanced by `unlockPopover()`.
+    ///
+    /// Idempotent — safe to call from multiple locks; behavior is only
+    /// restored when the last matching unlock lands.
+    func lockPopover() {
+        popoverLockCount += 1
+        popover?.behavior = .applicationDefined
+    }
+
+    func unlockPopover() {
+        popoverLockCount = max(0, popoverLockCount - 1)
+        if popoverLockCount == 0 {
+            popover?.behavior = .transient
         }
     }
 
