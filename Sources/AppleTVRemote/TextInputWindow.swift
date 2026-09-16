@@ -90,10 +90,28 @@ final class TextInputWindowManager: NSObject {
         )
         w.isOpaque = false
         w.backgroundColor = .clear
-        w.hasShadow = true
+        // hasShadow=true on a borderless window with a clear background
+        // makes macOS draw a rounded-rect window shadow whose corner
+        // radii don't match the SwiftUI content — a rectangular halo
+        // with more-rounded top corners than bottom. Turning the OS
+        // shadow off removes that artifact; the field's own drawing is
+        // all the chrome we want.
+        w.hasShadow = false
         w.level = .floating
         w.isReleasedWhenClosed = false
         w.contentView = hostingView
+        // Force the underlying content-view layer to render fully clear
+        // and un-rounded, otherwise macOS 26 draws its own subtle
+        // window-frame rounding around a borderless NSWindow — the
+        // "rectangular border" with mismatched top / bottom corners.
+        w.contentView?.wantsLayer = true
+        w.contentView?.layer?.backgroundColor = NSColor.clear.cgColor
+        w.contentView?.layer?.cornerRadius = 0
+        w.contentView?.layer?.masksToBounds = false
+        // Same treatment on the NSHostingView itself so SwiftUI's own
+        // wantsLayer default doesn't reintroduce a background.
+        hostingView.wantsLayer = true
+        hostingView.layer?.backgroundColor = NSColor.clear.cgColor
         w.center()
         w.delegate = self
         // Order matters: bring the app forward BEFORE keying the window,
@@ -159,16 +177,9 @@ private struct TextInputView: View {
 
     var body: some View {
         TextField("Search", text: $text)
-            .textFieldStyle(.plain)
+            .textFieldStyle(.roundedBorder)
             .font(.system(size: 18))
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(.regularMaterial)
-                    .shadow(color: .black.opacity(0.25), radius: 12, x: 0, y: 4)
-            )
-            .padding(6)  // gutter for the shadow so it isn't clipped
+            .padding(10)
             .focused($focused)
             .task(id: focusSignal.pulse) {
                 // The focus signal is pulsed both by openWindow (before
