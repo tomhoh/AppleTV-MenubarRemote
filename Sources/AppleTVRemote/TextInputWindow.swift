@@ -2,6 +2,18 @@ import SwiftUI
 import AppKit
 import Combine
 
+/// Shared focus signal between the AppKit window (which knows when it
+/// actually became key) and the SwiftUI TextField (which needs to be
+/// told). SwiftUI silently drops a `focused = true` if the hosting
+/// NSWindow isn't key yet — asking for focus once on `.task` is a race.
+/// Watching `pulse` and re-applying focus each time the window keys up
+/// makes the request stick regardless of timing.
+@MainActor
+final class TextInputFocusSignal: ObservableObject {
+    @Published var pulse: Int = 0
+    func request() { pulse &+= 1 }
+}
+
 /// Floating, borderless, transparent input strip that appears centered on
 /// screen when the ATV surfaces a text field (`_tiStarted`).
 ///
@@ -20,6 +32,7 @@ final class TextInputWindowManager: NSObject {
     private var window: NSWindow?
     private weak var connection: CompanionConnection?
     private var keyboardActiveObserver: AnyCancellable?
+    private let focusSignal = TextInputFocusSignal()
 
     func setUp(connection: CompanionConnection) {
         self.connection = connection
@@ -51,7 +64,10 @@ final class TextInputWindowManager: NSObject {
             return
         }
 
-        let view = TextInputView(connection: connection) { [weak self] in
+        let view = TextInputView(
+            connection: connection,
+            focusSignal: focusSignal
+        ) { [weak self] in
             self?.closeWindow()
         }
         let contentRect = NSRect(x: 0, y: 0, width: 380, height: 56)
@@ -80,8 +96,18 @@ final class TextInputWindowManager: NSObject {
         w.contentView = hostingView
         w.center()
         w.delegate = self
-        w.makeKeyAndOrderFront(nil)
+        // Order matters: bring the app forward BEFORE keying the window,
+        // otherwise the accessory-policy app can leave the window
+        // technically key while another app remains frontmost — SwiftUI
+        // then refuses to install first-responder focus on the field.
         NSApp.activate(ignoringOtherApps: true)
+        w.makeKeyAndOrderFront(nil)
+        // Kick the focus signal — SwiftUI's .focused($focused) request
+        // on first appearance often races the window becoming key.
+        // The `windowDidBecomeKey` callback below pulses it again once
+        // the window is actually key, so focus lands whichever tick
+        // wins.
+        focusSignal.request()
 
         KeyboardNotificationManager.shared.cancelAttention()
         window = w
@@ -98,6 +124,12 @@ extension TextInputWindowManager: NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
         window = nil
         KeyboardNotificationManager.shared.resetNotify()
+    }
+
+    func windowDidBecomeKey(_ notification: Notification) {
+        // Now that the window is actually key, ask the SwiftUI content
+        // to (re-)focus the TextField. Cheap and idempotent.
+        focusSignal.request()
     }
 }
 
@@ -118,6 +150,7 @@ private final class KeyableBorderlessWindow: NSWindow {
 /// window. Nothing else — no title, no icon, no trash button.
 private struct TextInputView: View {
     @ObservedObject var connection: CompanionConnection
+    @ObservedObject var focusSignal: TextInputFocusSignal
     var onClose: () -> Void
 
     @State private var text: String = ""
@@ -137,9 +170,12 @@ private struct TextInputView: View {
             )
             .padding(6)  // gutter for the shadow so it isn't clipped
             .focused($focused)
-            .task {
-                // Slight defer avoids a first-layout focus race on
-                // macOS 26 NSHostingView.
+            .task(id: focusSignal.pulse) {
+                // The focus signal is pulsed both by openWindow (before
+                // the window keys up) and by NSWindowDelegate.
+                // windowDidBecomeKey (once it actually is). One tick of
+                // sleep lets the runloop settle so SwiftUI's focus
+                // machinery accepts the request.
                 try? await Task.sleep(nanoseconds: 50_000_000)
                 focused = true
             }
