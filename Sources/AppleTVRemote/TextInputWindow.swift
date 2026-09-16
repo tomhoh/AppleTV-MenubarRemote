@@ -33,6 +33,7 @@ final class TextInputWindowManager: NSObject {
     private weak var connection: CompanionConnection?
     private var keyboardActiveObserver: AnyCancellable?
     private let focusSignal = TextInputFocusSignal()
+    private var outsideClickMonitor: Any?
 
     func setUp(connection: CompanionConnection) {
         self.connection = connection
@@ -103,6 +104,25 @@ final class TextInputWindowManager: NSObject {
         w.hasShadow = false
         w.level = .floating
         w.isReleasedWhenClosed = false
+        // Position: horizontally centered on the main screen, vertically
+        // *below* the menu-bar popover so the input strip doesn't sit
+        // behind the remote UI. Fallback to screen-center when the
+        // popover isn't currently open (e.g. user clicked a keyboard-
+        // input notification while the popover was closed).
+        let inputSize = contentRect.size
+        let screenFrame = NSScreen.main?.visibleFrame ?? .zero
+        let originX = screenFrame.midX - inputSize.width / 2
+        let originY: CGFloat
+        if let popFrame = MenuBarController.shared.popoverWindowFrame() {
+            // AppKit Y grows upward, so "below the popover" means Y
+            // strictly less than popover.minY.
+            originY = popFrame.minY - 20 - inputSize.height
+        } else {
+            originY = screenFrame.midY - inputSize.height / 2
+        }
+        w.setFrame(NSRect(origin: NSPoint(x: originX, y: originY),
+                          size: inputSize),
+                   display: false)
         w.contentView = hostingView
         // Force the underlying content-view layer to render fully clear
         // and un-rounded, otherwise macOS 26 draws its own subtle
@@ -116,7 +136,6 @@ final class TextInputWindowManager: NSObject {
         // wantsLayer default doesn't reintroduce a background.
         hostingView.wantsLayer = true
         hostingView.layer?.backgroundColor = NSColor.clear.cgColor
-        w.center()
         w.delegate = self
         // Order matters: bring the app forward BEFORE keying the window,
         // otherwise the accessory-policy app can leave the window
@@ -141,9 +160,28 @@ final class TextInputWindowManager: NSObject {
             popoverLocked = true
             MenuBarController.shared.lockPopover()
         }
+        // With the popover held open, we lose its transient click-out
+        // dismissal. Restore that manually via a global-monitor: any
+        // click outside this app dismisses BOTH the input strip and
+        // the popover. Clicks inside our own windows (popover or the
+        // input) don't trigger the global monitor, so they're safely
+        // ignored.
+        outsideClickMonitor = NSEvent.addGlobalMonitorForEvents(
+            matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+        ) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                self.closeWindow()
+                MenuBarController.shared.dismissPopover()
+            }
+        }
     }
 
     func closeWindow() {
+        if let monitor = outsideClickMonitor {
+            NSEvent.removeMonitor(monitor)
+            outsideClickMonitor = nil
+        }
         window?.close()
         window = nil
         KeyboardNotificationManager.shared.resetNotify()
@@ -156,6 +194,10 @@ final class TextInputWindowManager: NSObject {
 
 extension TextInputWindowManager: NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
+        if let monitor = outsideClickMonitor {
+            NSEvent.removeMonitor(monitor)
+            outsideClickMonitor = nil
+        }
         window = nil
         KeyboardNotificationManager.shared.resetNotify()
         if popoverLocked {

@@ -292,6 +292,21 @@ final class MenuBarController: NSObject, NSPopoverDelegate, NSMenuDelegate {
         }
     }
 
+    /// Dismiss the popover immediately, regardless of behavior. Called from
+    /// `TextInputWindowManager` when it observes an outside-app click and
+    /// wants both the input strip and the popover to go away.
+    func dismissPopover() {
+        popover?.performClose(nil)
+    }
+
+    /// Frame of the popover's backing NSWindow in AppKit screen coords, or
+    /// nil if it isn't currently shown. `TextInputWindowManager` uses this
+    /// to position the floating input strip just below the popover.
+    func popoverWindowFrame() -> NSRect? {
+        guard let pop = popover, pop.isShown else { return nil }
+        return pop.contentViewController?.view.window?.frame
+    }
+
     /// Programmatically open the popover. Kept for IPCServer callers that
     /// previously called `openMainWindow()`; routing to the popover is the
     /// closest equivalent now that there is no main window.
