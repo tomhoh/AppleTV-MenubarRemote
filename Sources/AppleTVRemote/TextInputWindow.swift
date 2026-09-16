@@ -70,7 +70,7 @@ final class TextInputWindowManager: NSObject {
         ) { [weak self] in
             self?.closeWindow()
         }
-        let contentRect = NSRect(x: 0, y: 0, width: 380, height: 56)
+        let contentRect = NSRect(x: 0, y: 0, width: 480, height: 72)
         let hostingView = NSHostingView(rootView: view)
         hostingView.frame = contentRect
         hostingView.autoresizingMask = [.width, .height]
@@ -177,9 +177,18 @@ private struct TextInputView: View {
 
     var body: some View {
         TextField("Search", text: $text)
-            .textFieldStyle(.roundedBorder)
-            .font(.system(size: 18))
-            .padding(10)
+            .textFieldStyle(.plain)
+            .font(.system(size: 24))
+            .padding(.horizontal, 20)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(
+                // Single symmetric rounded fill — no double borders,
+                // no asymmetric OS window rounding fighting a nested
+                // wrapper. Fills the whole NSWindow so nothing else
+                // is visible.
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(.thinMaterial)
+            )
             .focused($focused)
             .task(id: focusSignal.pulse) {
                 // The focus signal is pulsed both by openWindow (before
