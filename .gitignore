@@ -14,6 +14,8 @@ dist/
 
 # Beads / Dolt files (added by bd init)
 .beads-credential-key
+# Local-only working notes; not shared to the repo.
+CLAUDE.md
 AppleTVRemote.xcodeproj/project.xcworkspace/
 AppleTVRemote.xcodeproj/xcuserdata/
 assets/AppIcon.iconset/
