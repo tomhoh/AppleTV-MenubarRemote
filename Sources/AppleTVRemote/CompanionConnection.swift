@@ -585,7 +585,18 @@ extension CompanionConnection: CompanionSessionDelegate {
 
     func sessionDidChangeKeyboardActive(_ active: Bool, data: Data?) {
         keyboardActive = active
-        if !active { return }
+        // The ATV just reported a text field opened/closed. When one opens
+        // (typical trigger: user navigates to a Search field in Hulu, App
+        // Store, etc.) surface the input window immediately if we're the
+        // frontmost app, or post a macOS notification so the user can
+        // click through to it — `notify()` handles both cases. On close,
+        // reset the notify state so the next text field re-notifies.
+        if active {
+            let name = currentDevice?.name ?? "Apple TV"
+            KeyboardNotificationManager.shared.notify(deviceName: name)
+        } else {
+            KeyboardNotificationManager.shared.resetNotify()
+        }
     }
 
     func sessionDidUpdateAttentionState(_ st: Int) {
