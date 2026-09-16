@@ -45,15 +45,28 @@ final class TextInputWindowManager: NSObject {
         let view = TextInputView(connection: connection) { [weak self] in
             self?.closeWindow()
         }
-        let hosting = NSHostingController(rootView: view)
-        hosting.preferredContentSize = NSSize(width: 360, height: 90)
+        // Use NSHostingView + explicit contentRect instead of
+        // NSWindow(contentViewController: NSHostingController(...)) —
+        // on macOS 26 the latter triggers an NSHostingView constraint-
+        // invalidation loop the first time the window commits its CA
+        // transaction, and the resulting rethrown NSException aborts
+        // the process. Setting the content view directly on a window
+        // whose frame is fixed at construction sidesteps that path.
+        let contentRect = NSRect(x: 0, y: 0, width: 360, height: 90)
+        let hostingView = NSHostingView(rootView: view)
+        hostingView.frame = contentRect
+        hostingView.autoresizingMask = [.width, .height]
 
-        let w = NSWindow(contentViewController: hosting)
-        w.styleMask = [.titled, .closable]
+        let w = NSWindow(
+            contentRect: contentRect,
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        w.contentView = hostingView
         w.title = "Apple TV Keyboard"
         w.level = .floating
         w.isReleasedWhenClosed = false
-        w.setContentSize(NSSize(width: 360, height: 90))
         w.center()
         w.delegate = self
         w.makeKeyAndOrderFront(nil)
@@ -111,7 +124,13 @@ private struct TextInputView: View {
             TextField("Type and it appears on the TV…", text: $text)
                 .textFieldStyle(.roundedBorder)
                 .focused($focused)
-                .onAppear { focused = true }
+                .task {
+                    // Deferring the initial focus one runloop tick past
+                    // `.onAppear` avoids a macOS 26 NSHostingView layout
+                    // race that aborts the process — see openWindow().
+                    try? await Task.sleep(nanoseconds: 50_000_000)
+                    focused = true
+                }
                 .onSubmit(onClose)
                 .onChange(of: text) { newValue in
                     handleChange(old: previousText, new: newValue)
@@ -119,8 +138,6 @@ private struct TextInputView: View {
                 }
         }
         .padding(10)
-        .frame(width: 340)
-        .background(.thickMaterial)
         .onChange(of: connection.keyboardActive) { active in
             if !active { onClose() }
         }
