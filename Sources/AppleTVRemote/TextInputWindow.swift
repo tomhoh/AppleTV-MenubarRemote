@@ -2,15 +2,25 @@ import SwiftUI
 import AppKit
 import Combine
 
-/// Standalone floating window that opens when the Apple TV reports an active
-/// text field. Replaces the in-main-window sheet from the original UI.
+/// Bridges the ATV's "text field opened" event to the menu-bar popover.
+///
+/// The Apple TV pushes `_tiStarted` frames when the user navigates to a
+/// text field (Hulu search, App Store search, sign-in, etc.).
+/// `CompanionConnection.sessionDidChangeKeyboardActive` flips
+/// `keyboardActive`, and `RootView` swaps its content to `TextInputView`
+/// — an inline field that lives *inside* the popover, iPhone-Remote-
+/// style, rather than a separate floating window.
+///
+/// This manager's remaining job is small: when the ATV surfaces a text
+/// field and the user isn't already looking at the popover, bring the
+/// popover forward so the input is reachable. Everything else — the
+/// TextField itself, focus, dismissal on `keyboardActive` going false —
+/// is `RootView` / `TextInputView` territory.
 @MainActor
 final class TextInputWindowManager: NSObject {
     static let shared = TextInputWindowManager()
 
-    private var window: NSWindow?
     private weak var connection: CompanionConnection?
-    private var keyboardActiveObserver: AnyCancellable?
 
     func setUp(connection: CompanionConnection) {
         self.connection = connection
@@ -20,131 +30,54 @@ final class TextInputWindowManager: NSObject {
             name: KeyboardNotificationManager.openKeyboardSheetNotification,
             object: nil
         )
-
-        // Also auto-close if the Apple TV closes the text field while we
-        // weren't watching (e.g. user navigated away).
-        keyboardActiveObserver = connection.$keyboardActive
-            .removeDuplicates()
-            .sink { [weak self] active in
-                if !active { Task { @MainActor in self?.closeWindow() } }
-            }
     }
 
     @objc private func handleOpenNotification() {
-        openWindow()
-    }
-
-    func openWindow() {
-        guard let connection else { return }
-        if let existing = window {
-            existing.makeKeyAndOrderFront(nil)
-            NSApp.activate(ignoringOtherApps: true)
-            return
-        }
-
-        let view = TextInputView(connection: connection) { [weak self] in
-            self?.closeWindow()
-        }
-        // Use NSHostingView + explicit contentRect instead of
-        // NSWindow(contentViewController: NSHostingController(...)) —
-        // on macOS 26 the latter triggers an NSHostingView constraint-
-        // invalidation loop the first time the window commits its CA
-        // transaction, and the resulting rethrown NSException aborts
-        // the process. Setting the content view directly on a window
-        // whose frame is fixed at construction sidesteps that path.
-        let contentRect = NSRect(x: 0, y: 0, width: 360, height: 90)
-        let hostingView = NSHostingView(rootView: view)
-        hostingView.frame = contentRect
-        hostingView.autoresizingMask = [.width, .height]
-
-        let w = NSWindow(
-            contentRect: contentRect,
-            styleMask: [.titled, .closable],
-            backing: .buffered,
-            defer: false
-        )
-        w.contentView = hostingView
-        w.title = "Apple TV Keyboard"
-        w.level = .floating
-        w.isReleasedWhenClosed = false
-        w.center()
-        w.delegate = self
-        w.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
-
+        // Route the "sheet please" signal into "open the menu-bar popover".
+        // If it's already showing, this is a no-op inside openMainWindow.
+        MenuBarController.shared.openMainWindow()
         KeyboardNotificationManager.shared.cancelAttention()
-        window = w
-    }
-
-    func closeWindow() {
-        window?.close()
-        window = nil
-        KeyboardNotificationManager.shared.resetNotify()
     }
 }
 
-extension TextInputWindowManager: NSWindowDelegate {
-    func windowWillClose(_ notification: Notification) {
-        window = nil
-        KeyboardNotificationManager.shared.resetNotify()
-    }
-}
+// MARK: - Inline text-input view (hosted inside the popover)
 
-// MARK: - Inner view
-
-private struct TextInputView: View {
+/// The keyboard-input field the popover shows while `keyboardActive` is
+/// true. Deliberately minimal: one `TextField` with a "Search" placeholder
+/// and nothing else — mirrors the iPhone Apple TV Remote's input strip.
+struct TextInputView: View {
     @ObservedObject var connection: CompanionConnection
-    var onClose: () -> Void
 
-    /// Mirrors the text we believe is on the Apple TV right now (or at least
-    /// everything we've sent since the window opened). Diffing against new
-    /// values is how we decide whether to send `sendText` or `sendBackspace`.
+    /// Local mirror of the text we've sent to the ATV. Diffing against the
+    /// new textbox value is how we decide between `sendText` (append),
+    /// `sendBackspace` (shrink), or a fresh send (paste-replace).
     @State private var text: String = ""
     @State private var previousText: String = ""
     @FocusState private var focused: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
-                Image(systemName: "keyboard")
-                    .foregroundStyle(.secondary)
-                Text("Type to Apple TV")
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Button {
-                    Task { connection.sendClearText(completion: { _ in }) }
-                    text = ""
-                } label: {
-                    Image(systemName: "trash")
-                }
-                .buttonStyle(.borderless)
-                .help("Clear text on Apple TV")
+        TextField("Search", text: $text)
+            .textFieldStyle(.roundedBorder)
+            .focused($focused)
+            .task {
+                // Slight defer avoids a first-layout focus race on
+                // macOS 26 (same class of NSHostingView invalidation
+                // loop we hit in the old floating-window path).
+                try? await Task.sleep(nanoseconds: 50_000_000)
+                focused = true
             }
-            TextField("Type and it appears on the TV…", text: $text)
-                .textFieldStyle(.roundedBorder)
-                .focused($focused)
-                .task {
-                    // Deferring the initial focus one runloop tick past
-                    // `.onAppear` avoids a macOS 26 NSHostingView layout
-                    // race that aborts the process — see openWindow().
-                    try? await Task.sleep(nanoseconds: 50_000_000)
-                    focused = true
-                }
-                .onSubmit(onClose)
-                .onChange(of: text) { newValue in
-                    handleChange(old: previousText, new: newValue)
-                    previousText = newValue
-                }
-        }
-        .padding(10)
-        .onChange(of: connection.keyboardActive) { active in
-            if !active { onClose() }
-        }
-        .onChange(of: connection.state) { state in
-            if case .disconnected = state { onClose() }
-            if case .error = state { onClose() }
-        }
+            .onSubmit {
+                // The TV closes the field itself via the remote's Menu /
+                // Home button. Submit here just yields focus back so
+                // arrow keys and the D-pad work again immediately.
+                focused = false
+            }
+            .onChange(of: text) { newValue in
+                handleChange(old: previousText, new: newValue)
+                previousText = newValue
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
     }
 
     private func handleChange(old: String, new: String) {
@@ -156,10 +89,9 @@ private struct TextInputView: View {
             for _ in 0..<removed {
                 connection.sendBackspace { _ in }
             }
-        }
-        // Same length but different content = paste-replace; send the new
-        // content as fresh input. Acceptable simplification for v1.
-        else if new != old {
+        } else if new != old {
+            // Same length, different content — paste-replace. Send
+            // the new content as a fresh append; acceptable simplification.
             connection.sendText(new) { _ in }
         }
     }

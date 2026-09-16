@@ -49,7 +49,15 @@ struct RootView: View {
     private var content: some View {
         switch connection.state {
         case .connected:
-            RemoteView(onToggleAppLauncher: toggleAppLauncher)
+            // When the ATV opens a text field (Hulu Search, App Store,
+            // sign-in, …) it pushes `_tiStarted` → keyboardActive = true.
+            // Swap the remote UI for an inline search input, matching
+            // the iPhone Apple TV Remote's inline-keyboard behavior.
+            if connection.keyboardActive {
+                TextInputView(connection: connection)
+            } else {
+                RemoteView(onToggleAppLauncher: toggleAppLauncher)
+            }
         default:
             PairingView()
         }
