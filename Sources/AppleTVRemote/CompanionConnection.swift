@@ -287,7 +287,30 @@ final class CompanionConnection: ObservableObject {
             setsockopt(fd, IPPROTO_TCP, TCP_KEEPALIVE, &idleSec, socklen_t(MemoryLayout<Int32>.size))
 
             DispatchQueue.main.async {
-                guard let self else { return }
+                guard let self else {
+                    // Owner is gone; close the socket we just opened.
+                    // Without this the fd leaks until process exit —
+                    // the Windows sibling had an equivalent leak in
+                    // EnsureSessionAsync that let the Apple TV
+                    // accumulate half-paired "unknown" connections
+                    // (fixed in v0.4.9).
+                    Darwin.close(fd)
+                    return
+                }
+                // Close any prior session before replacing it. `connect`
+                // can be re-entered on main actor while a previous
+                // connect is still in flight on writeQueue (wakeAndConnect
+                // transitions .connecting ⇄ .waking and calls back into
+                // connect; AutoReconnector can also race a user click).
+                // If we just reassigned self.session, the previous
+                // session's fd would be dropped with no reference and
+                // its socket would stay open to the Apple TV. The TV
+                // then sees several half-authenticated connections it
+                // can't name — the "connected device named unknown"
+                // symptom the Windows sibling triggered more easily.
+                if let prior = self.session {
+                    prior.close()
+                }
                 self.connectionEpoch &+= 1
                 let sess = CompanionSession(
                     fd: fd,

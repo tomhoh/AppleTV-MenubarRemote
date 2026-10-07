@@ -96,6 +96,8 @@ public final class CompanionSession {
     /// Tear down the session: cancel keepalive, close the socket, clear callbacks.
     /// Safe to call multiple times.
     public func close() {
+        if closed { return }
+        closed = true
         keepaliveTimer?.cancel()
         keepaliveTimer = nil
         pendingCallbacks.removeAll()
@@ -103,6 +105,19 @@ public final class CompanionSession {
         // Closing the fd unblocks the blocking read() in startReadLoop.
         Darwin.close(fd)
     }
+
+    /// Belt-and-suspenders: if the owning CompanionConnection drops this
+    /// session without calling `close()` (e.g. a reconnect race leaves
+    /// the old session unreferenced), ARC still fires deinit — close
+    /// the fd here so a leaked session never keeps an unknown TCP
+    /// connection open to the Apple TV.
+    deinit {
+        if !closed {
+            Darwin.close(fd)
+        }
+    }
+
+    private var closed = false
 
     // MARK: - Session startup
 
