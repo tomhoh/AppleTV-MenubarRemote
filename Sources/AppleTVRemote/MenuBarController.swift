@@ -128,10 +128,13 @@ final class MenuBarController: NSObject, NSPopoverDelegate, NSMenuDelegate {
     }
 
     nonisolated func popoverDidClose(_ notification: Notification) {
-        Task { @MainActor in
-            self.removeScrollMonitor()
-            NSApp.deactivate()
-        }
+        // Remove the scroll monitor SYNCHRONOUSLY (not via a Task hop)
+        // so no further trackpad events can slip through. Previously this
+        // was dispatched to the main actor via Task, which left a brief
+        // window where in-flight scroll events were still captured and
+        // forwarded to the Apple TV after the popover was already gone.
+        MainActor.assumeIsolated { self.removeScrollMonitor() }
+        Task { @MainActor in NSApp.deactivate() }
     }
 
     // MARK: - Trackpad swipe-to-arrow
@@ -149,6 +152,13 @@ final class MenuBarController: NSObject, NSPopoverDelegate, NSMenuDelegate {
             matching: [.scrollWheel, .rightMouseDown]
         ) { [weak self] event in
             guard let self else { return event }
+            // Hard gate: if the popover isn't on-screen right now, don't
+            // consume or dispatch anything. The monitor is normally torn
+            // down in popoverDidClose, but AppKit can briefly leave it
+            // live between the user's dismissing click and the removal,
+            // and an in-flight scroll gesture captured in that window
+            // used to still fire HID commands at the Apple TV.
+            if self.popover?.isShown != true { return event }
 
             switch event.type {
             case .scrollWheel:
@@ -161,7 +171,13 @@ final class MenuBarController: NSObject, NSPopoverDelegate, NSMenuDelegate {
                 // Only react to trackpad-style precise deltas. Mouse wheels
                 // emit imprecise deltas that would feel jittery here.
                 guard event.hasPreciseScrollingDeltas else { return event }
-                Task { @MainActor in self.handleTrackpadScroll(event) }
+                Task { @MainActor in
+                    // Re-check at dispatch time: between the monitor
+                    // callback firing and this task actually running on
+                    // the main actor, the popover may have closed.
+                    guard self.popover?.isShown == true else { return }
+                    self.handleTrackpadScroll(event)
+                }
                 return nil  // consume
 
             case .rightMouseDown:
@@ -171,7 +187,10 @@ final class MenuBarController: NSObject, NSPopoverDelegate, NSMenuDelegate {
                    event.window === btnWin {
                     return event
                 }
-                Task { @MainActor in self.session?.dispatch(.select) }
+                Task { @MainActor in
+                    guard self.popover?.isShown == true else { return }
+                    self.session?.dispatch(.select)
+                }
                 return nil  // consume
 
             default:
