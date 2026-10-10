@@ -412,6 +412,46 @@ final class MenuBarController: NSObject, NSPopoverDelegate, NSMenuDelegate {
         launch.state = (SMAppService.mainApp.status == .enabled) ? .on : .off
         menu.addItem(launch)
 
+        // ── Manage pairings submenu ───────────────────────────────────────
+        // Lets the user remove the on-disk credentials for a specific
+        // paired Apple TV (or wipe all of them) without re-pairing. The TV
+        // itself keeps its "Allowed Devices" entry until the user removes
+        // it there — we don't implement HAP pair-remove (no reference
+        // client-side implementation exists for the Companion transport).
+        // The confirmation dialogs tell the user to clean up TV-side.
+        let paired = CredentialStore().allDeviceIDs()
+        if !paired.isEmpty {
+            let manage = NSMenuItem(title: "Manage pairings", action: nil, keyEquivalent: "")
+            let sub = NSMenu()
+            // Resolve each stored deviceID to a friendly name via the
+            // current discovery snapshot. Offline ATVs fall back to the
+            // short deviceID (hex suffix) so the user still has
+            // SOMETHING to disambiguate.
+            let devicesById = Dictionary(uniqueKeysWithValues:
+                (discovery?.devices ?? []).map { ($0.id, $0.name) })
+            for id in paired {
+                let friendly = devicesById[id] ?? "Apple TV (\(id.suffix(6)))"
+                let item = NSMenuItem(
+                    title: "Unpair \(friendly)…",
+                    action: #selector(unpairDevice(_:)),
+                    keyEquivalent: ""
+                )
+                item.target = self
+                item.representedObject = PairingRef(deviceID: id, displayName: friendly)
+                sub.addItem(item)
+            }
+            sub.addItem(.separator())
+            let clearAll = NSMenuItem(
+                title: "Clear all pairings…",
+                action: #selector(clearAllPairings),
+                keyEquivalent: ""
+            )
+            clearAll.target = self
+            sub.addItem(clearAll)
+            manage.submenu = sub
+            menu.addItem(manage)
+        }
+
         menu.addItem(.separator())
 
         let quit = NSMenuItem(title: "Quit Apple TV Remote",
@@ -459,6 +499,89 @@ final class MenuBarController: NSObject, NSPopoverDelegate, NSMenuDelegate {
 
     @objc private func disconnect(_ sender: Any?) {
         connection?.disconnect()
+    }
+
+    // MARK: - Unpair / clear-all pairings
+    //
+    // Local-only: deletes the credential file(s) from Application Support
+    // and tears down the active session if the user unpaired the device
+    // they're currently connected to. The Apple TV keeps its "Allowed
+    // Devices" entry until the user removes it there — we don't implement
+    // HAP pair-remove (no reference client-side implementation for the
+    // Companion transport exists in pyatv or elsewhere, and getting the
+    // frame type wrong risks TV-side state corruption). The confirmation
+    // and completion dialogs tell the user to clean up TV-side.
+
+    @objc private func unpairDevice(_ sender: NSMenuItem) {
+        guard let ref = sender.representedObject as? PairingRef else { return }
+
+        let alert = NSAlert()
+        alert.messageText = "Unpair \"\(ref.displayName)\" from this Mac?"
+        alert.informativeText =
+            "This deletes the stored credentials. You'll still need to " +
+            "remove this Mac from the Apple TV: Settings → Users and " +
+            "Accounts → Allowed Devices."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Unpair")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+        // If this device is currently connected, tear the session down
+        // first so we don't keep sending frames with a credential that
+        // no longer exists.
+        if connection?.currentDevice?.id == ref.deviceID {
+            connection?.disconnect()
+        }
+
+        let store = CredentialStore()
+        store.delete(deviceID: ref.deviceID)
+        store.deleteAirPlay(deviceID: ref.deviceID)
+
+        let done = NSAlert()
+        done.messageText = "Pairing removed from this Mac."
+        done.informativeText =
+            "Open your Apple TV: Settings → Users and Accounts → Allowed " +
+            "Devices, and delete the entry for this Mac to finish cleanup."
+        done.alertStyle = .informational
+        done.addButton(withTitle: "OK")
+        done.runModal()
+    }
+
+    @objc private func clearAllPairings(_ sender: Any?) {
+        let alert = NSAlert()
+        alert.messageText = "Remove ALL stored Apple TV pairings from this Mac?"
+        alert.informativeText =
+            "This cannot be undone — you'll need to re-pair each Apple TV. " +
+            "You should also remove this Mac from each Apple TV: Settings → " +
+            "Users and Accounts → Allowed Devices."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Clear all")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+        connection?.disconnect()
+        let removed = CredentialStore().deleteAll()
+
+        let done = NSAlert()
+        done.messageText = "Cleared \(removed) pairing(s) from this Mac."
+        done.informativeText =
+            "Open each Apple TV: Settings → Users and Accounts → Allowed " +
+            "Devices, and remove any lingering entries for this Mac."
+        done.alertStyle = .informational
+        done.addButton(withTitle: "OK")
+        done.runModal()
+    }
+
+    /// Carries a paired-device reference through NSMenuItem.representedObject.
+    /// NSMenuItem's representedObject requires AnyObject, so a class, not a
+    /// struct.
+    private final class PairingRef: NSObject {
+        let deviceID: String
+        let displayName: String
+        init(deviceID: String, displayName: String) {
+            self.deviceID = deviceID
+            self.displayName = displayName
+        }
     }
 
     @objc private func showKeyboardShortcuts(_ sender: Any?) {

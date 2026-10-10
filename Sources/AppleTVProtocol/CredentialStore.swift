@@ -106,6 +106,39 @@ public struct CredentialStore {
         }
     }
 
+    // MARK: - Enumeration / bulk delete
+
+    /// List every stored Companion pairing's deviceID (ATV identifier).
+    /// Order is unspecified. Reads via a per-file shared lock so a
+    /// concurrent save of a different pairing can't tear the result.
+    public func allDeviceIDs() -> [String] {
+        guard let items = try? FileManager.default.contentsOfDirectory(atPath: Self.appDir.path)
+        else { return [] }
+        return items.compactMap { name in
+            // Companion credentials are "<deviceID>.json". Exclude
+            // ".airplay.json" sidecars so each pairing is reported
+            // once. Also skip stray .lock files and anything else.
+            guard name.hasSuffix(".json"), !name.hasSuffix(".airplay.json") else { return nil }
+            return String(name.dropLast(".json".count))
+        }
+    }
+
+    /// Delete every stored Companion + AirPlay pairing. Returns the
+    /// number of Companion pairings removed (AirPlay sidecars count
+    /// toward cleanup but not toward the user-visible total — one
+    /// "pairing" conceptually is one Companion credential). Lock files
+    /// are left behind so their fds stay valid for any still-live
+    /// CredentialStore instance.
+    @discardableResult
+    public func deleteAll() -> Int {
+        let ids = allDeviceIDs()
+        for id in ids {
+            delete(deviceID: id)
+            deleteAirPlay(deviceID: id)
+        }
+        return ids.count
+    }
+
     // MARK: - AirPlay
 
     public func saveAirPlay(_ credentials: AirPlayCredentials, for deviceID: String) {
